@@ -1,0 +1,105 @@
+{
+  "generatedAt": "deterministic",
+  "dictionary": {
+    "words": 389,
+    "minLength": 3,
+    "maxLength": 9
+  },
+  "levels": [
+    {
+      "id": 1,
+      "title": "Meadow Draft",
+      "pack": "Generated Grove",
+      "letters": "PLANT",
+      "targets": [
+        "PLANT",
+        "PANT",
+        "PLAN",
+        "ALT",
+        "ANT",
+        "APT"
+      ],
+      "bonus": [
+        "LAP",
+        "NAP",
+        "PAL",
+        "PAN",
+        "PAT",
+        "TAN",
+        "TAP"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Stone Draft",
+      "pack": "Generated Grove",
+      "letters": "STONE",
+      "targets": [
+        "NOTES",
+        "STONE",
+        "NOTE",
+        "ONES",
+        "TONE",
+        "TONS"
+      ],
+      "bonus": [
+        "NET",
+        "ONE",
+        "SET",
+        "SON",
+        "TEN",
+        "TOE",
+        "TON"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Cedar Draft",
+      "pack": "Generated Grove",
+      "letters": "CEDAR",
+      "targets": [
+        "CEDAR",
+        "CARE",
+        "DARE",
+        "RACE",
+        "READ",
+        "ACE"
+      ],
+      "bonus": [
+        "ARC",
+        "ARE",
+        "CAD",
+        "CAR",
+        "EAR",
+        "ERA",
+        "RED"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Petal Draft",
+      "pack": "Generated Grove",
+      "letters": "PETALS",
+      "targets": [
+        "PETALS",
+        "LEAPS",
+        "PLATE",
+        "PLEAT",
+        "LEAP",
+        "PALE"
+      ],
+      "bonus": [
+        "PAST",
+        "PEAL",
+        "SALE",
+        "SEAL",
+        "ALE",
+        "ALT",
+        "APT",
+        "EAT",
+        "LAP",
+        "LET"
+      ]
+    }
+  ]
+}

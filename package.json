@@ -1,0 +1,22 @@
+{
+  "name": "word-garden",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test src/*.test.js",
+    "test:smoke": "node scripts/smoke-swipe.js",
+    "generate-levels": "node scripts/generate-levels.js",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:debug": "npm run android:sync && cd android && ./gradlew :app:assembleDebug"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
+    "vite": "^5.4.21"
+  }
+}
