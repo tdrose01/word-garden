@@ -13,6 +13,17 @@ import {
 } from './game.js';
 
 const app = document.querySelector('#app');
+const BUILD_VERSION = '0.1.0-web';
+const FEEDBACK_ENDPOINT = '/api/feedback';
+const GITHUB_ISSUE_URL = 'https://github.com/tdrose01/word-garden/issues/new';
+const GITHUB_ISSUE_LABELS = 'type:test,area:testing,closed-test,word-garden';
+const FEEDBACK_CATEGORIES = [
+  { value: 'bug', label: 'Bug' },
+  { value: 'puzzle', label: 'Puzzle' },
+  { value: 'controls', label: 'Controls' },
+  { value: 'performance', label: 'Performance' },
+  { value: 'idea', label: 'Idea' }
+];
 let state = loadState();
 let wheelLetters = getLevel(state).letters;
 let selection = [];
@@ -36,21 +47,23 @@ function render() {
   app.innerHTML = `
     <section class="topbar" aria-label="Game status">
       <div>
-        <p class="eyebrow">${levelLabel}</p>
+        <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>${levelLabel}</p>
         <h1>Word Garden</h1>
+        <p class="tagline">A little word ritual.</p>
       </div>
-      <div class="coin-pill ${coinChanged ? 'is-bumped' : ''}" aria-label="${state.coins} coins">${state.coins}</div>
+      <div class="coin-pill ${coinChanged ? 'is-bumped' : ''}" aria-label="${state.coins} coins"><span>${state.coins}</span></div>
     </section>
 
     <section class="mode-tabs" aria-label="Game mode">
-      <button class="${state.mode === 'campaign' ? 'is-active' : ''}" data-mode="campaign">Levels</button>
-      <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily">Daily</button>
+      <button class="${state.mode === 'campaign' ? 'is-active' : ''}" data-mode="campaign" aria-pressed="${state.mode === 'campaign'}">Levels</button>
+      <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily" aria-pressed="${state.mode === 'daily'}">Daily</button>
     </section>
 
     ${state.mode === 'daily' ? renderDailyStats(snapshot) : renderCampaignStats(snapshot)}
 
-    <section class="board-wrap">
+    <section class="board-wrap" aria-label="${snapshot.level.title} puzzle board">
       <div class="level-card">
+        <span class="level-card__leaf" aria-hidden="true">❧</span>
         <p>${snapshot.level.title}</p>
         <strong>${progress.solved.length}/${snapshot.level.targets.length}</strong>
       </div>
@@ -69,7 +82,7 @@ function render() {
     </section>
 
     <section class="composer" aria-label="Word builder">
-      <div class="current-word ${currentWord ? 'has-word' : ''}">${currentWord || 'TAP OR SWIPE LETTERS'}</div>
+      <div class="current-word ${currentWord ? 'has-word' : ''}" role="status" aria-live="polite">${currentWord || 'TAP OR SWIPE LETTERS'}</div>
       <div class="wheel" data-wheel>
         <svg class="swipe-guide" data-swipe-guide aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
           <polyline class="swipe-guide__path" data-swipe-path points=""></polyline>
@@ -82,9 +95,13 @@ function render() {
             const angle = (index / wheelLetters.length) * Math.PI * 2 - Math.PI / 2;
             const x = 50 + Math.cos(angle) * 34;
             const y = 50 + Math.sin(angle) * 34;
-            return `<button class="letter ${active ? 'is-active' : ''}" data-index="${index}" style="left: ${x}%; top: ${y}%;">${letter}</button>`;
+            return `<button class="letter ${active ? 'is-active' : ''}" data-index="${index}" aria-pressed="${active}" aria-label="Add ${letter}" style="left: ${x}%; top: ${y}%;">${letter}</button>`;
           })
           .join('')}
+        <div class="wheel-center" aria-hidden="true">
+          <span>grow</span>
+          <small>your word</small>
+        </div>
       </div>
       <div class="actions">
         <button data-action="clear">Clear</button>
@@ -101,20 +118,174 @@ function render() {
 
     <section class="ledger">
       <div>
-        <span>Bonus words</span>
+        <span><span class="ledger-leaf" aria-hidden="true">✿</span> Bonus words</span>
         <strong>${progress.bonusFound.length}</strong>
       </div>
-      <p>${message}</p>
-      ${feedback ? `<strong class="feedback-toast feedback-toast--${feedback.tone}" role="status">${feedback.label}</strong>` : ''}
+      <p role="status" aria-live="polite" aria-atomic="true">${message}</p>
+      ${feedback ? `<strong class="feedback-toast feedback-toast--${feedback.tone}">${feedback.label}</strong>` : ''}
     </section>
 
     ${completion ? renderLevelComplete(completion) : ''}
+
+    ${renderFeedbackPanel(snapshot)}
   `;
 
   bindEvents();
+  bindFeedbackEvents(snapshot);
   updateSwipeGuide();
   fitBoard();
   previousCoins = state.coins;
+}
+
+function renderFeedbackPanel(snapshot) {
+  const shareSupported = typeof navigator.share === 'function';
+  return `
+    <section class="tester-feedback" data-feedback-root>
+      <button class="tester-feedback__cta" type="button" aria-expanded="false" aria-controls="tester-feedback-panel">
+        Feedback
+      </button>
+      <div class="tester-feedback__panel" id="tester-feedback-panel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="tester-feedback-title">
+        <div class="tester-feedback__header">
+          <div>
+            <p>Tester Report</p>
+            <h2 id="tester-feedback-title">Word Garden Feedback</h2>
+          </div>
+          <button class="tester-feedback__close" type="button" data-feedback-close aria-label="Close feedback">x</button>
+        </div>
+        <label>
+          Category
+          <select data-feedback-category>
+            ${FEEDBACK_CATEGORIES.map((item) => `<option value="${item.value}">${item.label}</option>`).join('')}
+          </select>
+        </label>
+        <div class="tester-feedback__grid">
+          <label>
+            Device
+            <input data-feedback-device type="text" autocomplete="off" value="${escapeAttribute(getDeviceLabel())}" />
+          </label>
+          <label>
+            Browser
+            <input data-feedback-browser type="text" readonly value="${escapeAttribute(getBrowserLabel())}" />
+          </label>
+        </div>
+        <div class="tester-feedback__grid">
+          <label>
+            Build
+            <input data-feedback-build type="text" readonly value="${BUILD_VERSION}" />
+          </label>
+          <label>
+            Mode / level
+            <input data-feedback-level type="text" autocomplete="off" value="${escapeAttribute(getFeedbackLevelLabel(snapshot))}" />
+          </label>
+        </div>
+        <label>
+          Performance note
+          <input data-feedback-performance type="text" placeholder="Smooth, stuttered, hot device, slow board..." />
+        </label>
+        <label>
+          Report
+          <textarea data-feedback-report rows="5" placeholder="What happened? What did you expect?"></textarea>
+        </label>
+        <div class="tester-feedback__actions">
+          <button type="button" data-feedback-github>Create GitHub ticket</button>
+          <button type="button" data-feedback-copy>Copy report</button>
+          <button type="button" data-feedback-share ${shareSupported ? '' : 'hidden'}>Web Share</button>
+        </div>
+        <p class="tester-feedback__status" data-feedback-status aria-live="polite"></p>
+      </div>
+    </section>
+  `;
+}
+
+function bindFeedbackEvents(snapshot) {
+  const root = app.querySelector('[data-feedback-root]');
+  if (!root) return;
+
+  const cta = root.querySelector('.tester-feedback__cta');
+  const panel = root.querySelector('.tester-feedback__panel');
+  const close = root.querySelector('[data-feedback-close]');
+  const githubButton = root.querySelector('[data-feedback-github]');
+  const copyButton = root.querySelector('[data-feedback-copy]');
+  const shareButton = root.querySelector('[data-feedback-share]');
+  const status = root.querySelector('[data-feedback-status]');
+
+  const setOpen = (open, restoreFocus = false) => {
+    root.classList.toggle('is-open', open);
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    cta.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      root.querySelector('[data-feedback-level]').value = getFeedbackLevelLabel(snapshot);
+      window.setTimeout(() => root.querySelector('[data-feedback-category]')?.focus(), 0);
+    } else if (restoreFocus) {
+      cta.focus();
+    }
+  };
+
+  const clearStatus = () => {
+    status.textContent = '';
+    status.replaceChildren();
+  };
+
+  const setStatusText = (text) => {
+    status.textContent = text;
+  };
+
+  const setStatusLink = (text, href, linkText) => {
+    clearStatus();
+    status.append(document.createTextNode(`${text} `));
+    const link = document.createElement('a');
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = linkText;
+    status.append(link);
+  };
+
+  cta.addEventListener('click', () => setOpen(true));
+  close.addEventListener('click', () => setOpen(false, true));
+  panel.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setOpen(false, true);
+    }
+  });
+  copyButton.addEventListener('click', async () => {
+    try {
+      await copyText(buildFeedbackReport(root));
+      setStatusText('Report copied.');
+    } catch {
+      setStatusText('Copy failed. Select the report text manually.');
+    }
+  });
+  shareButton?.addEventListener('click', async () => {
+    try {
+      await navigator.share({ title: 'Word Garden Feedback', text: buildFeedbackReport(root) });
+      setStatusText('Share opened.');
+    } catch (error) {
+      if (error?.name !== 'AbortError') setStatusText('Share failed.');
+    }
+  });
+  githubButton.addEventListener('click', async () => {
+    githubButton.disabled = true;
+    setStatusText('Creating GitHub ticket...');
+    try {
+      const response = await fetch(FEEDBACK_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(buildFeedbackPayload(root))
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.ok && result?.issueUrl) {
+        setStatusLink('GitHub ticket created:', result.issueUrl, 'Open issue');
+      } else {
+        setStatusLink('Ticket creation failed. Use this draft instead:', result?.draftUrl || buildFeedbackDraftUrl(root), 'Open draft');
+      }
+    } catch {
+      setStatusLink('Feedback endpoint unavailable. Use this draft instead:', buildFeedbackDraftUrl(root), 'Open draft');
+    } finally {
+      githubButton.disabled = false;
+    }
+  });
 }
 
 function renderDailyStats(snapshot) {
@@ -179,6 +350,106 @@ function renderCampaignStats(snapshot) {
   `;
 }
 
+function getBrowserLabel() {
+  const ua = navigator.userAgent || '';
+  const uaData = navigator.userAgentData;
+  if (uaData?.brands?.length) {
+    const brand = uaData.brands.find((item) => !/Not/i.test(item.brand)) || uaData.brands[0];
+    return `${brand.brand} ${brand.version}`;
+  }
+  if (/Edg\//.test(ua)) return `Edge ${ua.match(/Edg\/([\d.]+)/)?.[1] || ''}`.trim();
+  if (/Chrome\//.test(ua)) return `Chrome ${ua.match(/Chrome\/([\d.]+)/)?.[1] || ''}`.trim();
+  if (/Firefox\//.test(ua)) return `Firefox ${ua.match(/Firefox\/([\d.]+)/)?.[1] || ''}`.trim();
+  if (/Safari\//.test(ua)) return `Safari ${ua.match(/Version\/([\d.]+)/)?.[1] || ''}`.trim();
+  return 'Unknown browser';
+}
+
+function getDeviceLabel() {
+  const ua = navigator.userAgent || '';
+  const platform = navigator.userAgentData?.platform || navigator.platform || 'unknown platform';
+  if (/CrOS/i.test(ua)) return `Chromebook (${platform})`;
+  if (/Pixel/i.test(ua)) return `Pixel / Android (${platform})`;
+  if (/Android/i.test(ua)) return `Android (${platform})`;
+  if (/iPhone|iPad|iPod/i.test(ua)) return `iOS (${platform})`;
+  return platform;
+}
+
+function getFeedbackLevelLabel(snapshot) {
+  if (state.mode === 'daily') {
+    return `Daily - ${snapshot.level.title}`;
+  }
+  return `Level ${snapshot.campaignStats.currentLevel}/${snapshot.campaignStats.totalLevels} - ${snapshot.level.title} (${snapshot.campaignStats.pack.title})`;
+}
+
+function feedbackValue(root, selector) {
+  return String(root.querySelector(selector)?.value || '').trim() || 'Not provided';
+}
+
+function feedbackSelectLabel(root) {
+  const select = root.querySelector('[data-feedback-category]');
+  return select?.selectedOptions?.[0]?.textContent?.trim() || feedbackValue(root, '[data-feedback-category]');
+}
+
+function buildFeedbackReport(root) {
+  return [
+    'Word Garden Tester Report',
+    `Category: ${feedbackSelectLabel(root)}`,
+    `Device: ${feedbackValue(root, '[data-feedback-device]')}`,
+    `Browser: ${feedbackValue(root, '[data-feedback-browser]')}`,
+    `Build: ${feedbackValue(root, '[data-feedback-build]')}`,
+    `Mode: ${state.mode}`,
+    `Mode / level: ${feedbackValue(root, '[data-feedback-level]')}`,
+    `Performance: ${feedbackValue(root, '[data-feedback-performance]')}`,
+    '',
+    'Report:',
+    feedbackValue(root, '[data-feedback-report]')
+  ].join('\n');
+}
+
+function buildFeedbackPayload(root) {
+  return {
+    category: feedbackValue(root, '[data-feedback-category]'),
+    device: feedbackValue(root, '[data-feedback-device]'),
+    browser: feedbackValue(root, '[data-feedback-browser]'),
+    build: feedbackValue(root, '[data-feedback-build]'),
+    mode: state.mode,
+    level: feedbackValue(root, '[data-feedback-level]'),
+    performance: feedbackValue(root, '[data-feedback-performance]'),
+    report: feedbackValue(root, '[data-feedback-report]')
+  };
+}
+
+function buildFeedbackDraftUrl(root) {
+  const params = new URLSearchParams({
+    title: `[Playtest]: ${feedbackSelectLabel(root)} - ${state.mode} - ${feedbackValue(root, '[data-feedback-level]')}`,
+    labels: GITHUB_ISSUE_LABELS,
+    body: buildFeedbackReport(root)
+  });
+  return `${GITHUB_ISSUE_URL}?${params.toString()}`;
+}
+
+function copyText(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const scratch = document.createElement('textarea');
+  scratch.value = text;
+  scratch.setAttribute('readonly', '');
+  scratch.style.position = 'fixed';
+  scratch.style.left = '-9999px';
+  document.body.appendChild(scratch);
+  scratch.select();
+  const copied = document.execCommand?.('copy');
+  scratch.remove();
+  return copied ? Promise.resolve() : Promise.reject(new Error('copy unavailable'));
+}
+
+function escapeAttribute(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function renderLevelComplete(details) {
   return `
     <section class="level-complete" role="dialog" aria-modal="true" aria-labelledby="level-complete-title">
@@ -220,6 +491,9 @@ function bindEvents() {
       swipePointer = getWheelPoint(event.clientX, event.clientY);
       selectLetter(Number(button.dataset.index));
     });
+    button.addEventListener('click', (event) => {
+      if (event.detail === 0) selectLetter(Number(button.dataset.index));
+    });
   });
 
   app.querySelector('[data-wheel]').addEventListener('pointerup', () => {
@@ -242,6 +516,10 @@ function bindEvents() {
       render();
     });
   });
+
+  if (completion) {
+    window.setTimeout(() => app.querySelector('.level-complete [data-action="continue"]')?.focus(), 0);
+  }
 }
 
 function selectLetter(index) {
@@ -268,7 +546,9 @@ function updateSelectionView() {
   }
 
   app.querySelectorAll('.letter').forEach((button) => {
-    button.classList.toggle('is-active', selectedIndexes.has(Number(button.dataset.index)));
+    const active = selectedIndexes.has(Number(button.dataset.index));
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
 
   updateSwipeGuide();
