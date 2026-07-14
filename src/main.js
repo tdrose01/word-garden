@@ -13,6 +13,17 @@ import {
 } from './game.js';
 
 const app = document.querySelector('#app');
+const BUILD_VERSION = '0.1.0-web';
+const FEEDBACK_ENDPOINT = '/api/feedback';
+const GITHUB_ISSUE_URL = 'https://github.com/tdrose01/word-garden/issues/new';
+const GITHUB_ISSUE_LABELS = 'type:test,area:testing,closed-test,word-garden';
+const FEEDBACK_CATEGORIES = [
+  { value: 'bug', label: 'Bug' },
+  { value: 'puzzle', label: 'Puzzle' },
+  { value: 'controls', label: 'Controls' },
+  { value: 'performance', label: 'Performance' },
+  { value: 'idea', label: 'Idea' }
+];
 let state = loadState();
 let wheelLetters = getLevel(state).letters;
 let selection = [];
@@ -109,12 +120,158 @@ function render() {
     </section>
 
     ${completion ? renderLevelComplete(completion) : ''}
+
+    ${renderFeedbackPanel(snapshot)}
   `;
 
   bindEvents();
+  bindFeedbackEvents(snapshot);
   updateSwipeGuide();
   fitBoard();
   previousCoins = state.coins;
+}
+
+function renderFeedbackPanel(snapshot) {
+  const shareSupported = typeof navigator.share === 'function';
+  return `
+    <section class="tester-feedback" data-feedback-root>
+      <button class="tester-feedback__cta" type="button" aria-expanded="false" aria-controls="tester-feedback-panel">
+        Feedback
+      </button>
+      <div class="tester-feedback__panel" id="tester-feedback-panel" aria-hidden="true" aria-label="Word Garden feedback">
+        <div class="tester-feedback__header">
+          <div>
+            <p>Tester Report</p>
+            <h2>Word Garden Feedback</h2>
+          </div>
+          <button class="tester-feedback__close" type="button" data-feedback-close aria-label="Close feedback">x</button>
+        </div>
+        <label>
+          Category
+          <select data-feedback-category>
+            ${FEEDBACK_CATEGORIES.map((item) => `<option value="${item.value}">${item.label}</option>`).join('')}
+          </select>
+        </label>
+        <div class="tester-feedback__grid">
+          <label>
+            Device
+            <input data-feedback-device type="text" autocomplete="off" value="${escapeAttribute(getDeviceLabel())}" />
+          </label>
+          <label>
+            Browser
+            <input data-feedback-browser type="text" readonly value="${escapeAttribute(getBrowserLabel())}" />
+          </label>
+        </div>
+        <div class="tester-feedback__grid">
+          <label>
+            Build
+            <input data-feedback-build type="text" readonly value="${BUILD_VERSION}" />
+          </label>
+          <label>
+            Mode / level
+            <input data-feedback-level type="text" autocomplete="off" value="${escapeAttribute(getFeedbackLevelLabel(snapshot))}" />
+          </label>
+        </div>
+        <label>
+          Performance note
+          <input data-feedback-performance type="text" placeholder="Smooth, stuttered, hot device, slow board..." />
+        </label>
+        <label>
+          Report
+          <textarea data-feedback-report rows="5" placeholder="What happened? What did you expect?"></textarea>
+        </label>
+        <div class="tester-feedback__actions">
+          <button type="button" data-feedback-github>Create GitHub ticket</button>
+          <button type="button" data-feedback-copy>Copy report</button>
+          <button type="button" data-feedback-share ${shareSupported ? '' : 'hidden'}>Web Share</button>
+        </div>
+        <p class="tester-feedback__status" data-feedback-status aria-live="polite"></p>
+      </div>
+    </section>
+  `;
+}
+
+function bindFeedbackEvents(snapshot) {
+  const root = app.querySelector('[data-feedback-root]');
+  if (!root) return;
+
+  const cta = root.querySelector('.tester-feedback__cta');
+  const panel = root.querySelector('.tester-feedback__panel');
+  const close = root.querySelector('[data-feedback-close]');
+  const githubButton = root.querySelector('[data-feedback-github]');
+  const copyButton = root.querySelector('[data-feedback-copy]');
+  const shareButton = root.querySelector('[data-feedback-share]');
+  const status = root.querySelector('[data-feedback-status]');
+
+  const setOpen = (open) => {
+    root.classList.toggle('is-open', open);
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    cta.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      root.querySelector('[data-feedback-level]').value = getFeedbackLevelLabel(snapshot);
+      window.setTimeout(() => root.querySelector('[data-feedback-category]')?.focus(), 0);
+    }
+  };
+
+  const clearStatus = () => {
+    status.textContent = '';
+    status.replaceChildren();
+  };
+
+  const setStatusText = (text) => {
+    status.textContent = text;
+  };
+
+  const setStatusLink = (text, href, linkText) => {
+    clearStatus();
+    status.append(document.createTextNode(`${text} `));
+    const link = document.createElement('a');
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = linkText;
+    status.append(link);
+  };
+
+  cta.addEventListener('click', () => setOpen(true));
+  close.addEventListener('click', () => setOpen(false));
+  copyButton.addEventListener('click', async () => {
+    try {
+      await copyText(buildFeedbackReport(root));
+      setStatusText('Report copied.');
+    } catch {
+      setStatusText('Copy failed. Select the report text manually.');
+    }
+  });
+  shareButton?.addEventListener('click', async () => {
+    try {
+      await navigator.share({ title: 'Word Garden Feedback', text: buildFeedbackReport(root) });
+      setStatusText('Share opened.');
+    } catch (error) {
+      if (error?.name !== 'AbortError') setStatusText('Share failed.');
+    }
+  });
+  githubButton.addEventListener('click', async () => {
+    githubButton.disabled = true;
+    setStatusText('Creating GitHub ticket...');
+    try {
+      const response = await fetch(FEEDBACK_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(buildFeedbackPayload(root))
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.ok && result?.issueUrl) {
+        setStatusLink('GitHub ticket created:', result.issueUrl, 'Open issue');
+      } else {
+        setStatusLink('Ticket creation failed. Use this draft instead:', result?.draftUrl || buildFeedbackDraftUrl(root), 'Open draft');
+      }
+    } catch {
+      setStatusLink('Feedback endpoint unavailable. Use this draft instead:', buildFeedbackDraftUrl(root), 'Open draft');
+    } finally {
+      githubButton.disabled = false;
+    }
+  });
 }
 
 function renderDailyStats(snapshot) {
@@ -177,6 +334,106 @@ function renderCampaignStats(snapshot) {
       </div>
     </section>
   `;
+}
+
+function getBrowserLabel() {
+  const ua = navigator.userAgent || '';
+  const uaData = navigator.userAgentData;
+  if (uaData?.brands?.length) {
+    const brand = uaData.brands.find((item) => !/Not/i.test(item.brand)) || uaData.brands[0];
+    return `${brand.brand} ${brand.version}`;
+  }
+  if (/Edg\//.test(ua)) return `Edge ${ua.match(/Edg\/([\d.]+)/)?.[1] || ''}`.trim();
+  if (/Chrome\//.test(ua)) return `Chrome ${ua.match(/Chrome\/([\d.]+)/)?.[1] || ''}`.trim();
+  if (/Firefox\//.test(ua)) return `Firefox ${ua.match(/Firefox\/([\d.]+)/)?.[1] || ''}`.trim();
+  if (/Safari\//.test(ua)) return `Safari ${ua.match(/Version\/([\d.]+)/)?.[1] || ''}`.trim();
+  return 'Unknown browser';
+}
+
+function getDeviceLabel() {
+  const ua = navigator.userAgent || '';
+  const platform = navigator.userAgentData?.platform || navigator.platform || 'unknown platform';
+  if (/CrOS/i.test(ua)) return `Chromebook (${platform})`;
+  if (/Pixel/i.test(ua)) return `Pixel / Android (${platform})`;
+  if (/Android/i.test(ua)) return `Android (${platform})`;
+  if (/iPhone|iPad|iPod/i.test(ua)) return `iOS (${platform})`;
+  return platform;
+}
+
+function getFeedbackLevelLabel(snapshot) {
+  if (state.mode === 'daily') {
+    return `Daily - ${snapshot.level.title}`;
+  }
+  return `Level ${snapshot.campaignStats.currentLevel}/${snapshot.campaignStats.totalLevels} - ${snapshot.level.title} (${snapshot.campaignStats.pack.title})`;
+}
+
+function feedbackValue(root, selector) {
+  return String(root.querySelector(selector)?.value || '').trim() || 'Not provided';
+}
+
+function feedbackSelectLabel(root) {
+  const select = root.querySelector('[data-feedback-category]');
+  return select?.selectedOptions?.[0]?.textContent?.trim() || feedbackValue(root, '[data-feedback-category]');
+}
+
+function buildFeedbackReport(root) {
+  return [
+    'Word Garden Tester Report',
+    `Category: ${feedbackSelectLabel(root)}`,
+    `Device: ${feedbackValue(root, '[data-feedback-device]')}`,
+    `Browser: ${feedbackValue(root, '[data-feedback-browser]')}`,
+    `Build: ${feedbackValue(root, '[data-feedback-build]')}`,
+    `Mode: ${state.mode}`,
+    `Mode / level: ${feedbackValue(root, '[data-feedback-level]')}`,
+    `Performance: ${feedbackValue(root, '[data-feedback-performance]')}`,
+    '',
+    'Report:',
+    feedbackValue(root, '[data-feedback-report]')
+  ].join('\n');
+}
+
+function buildFeedbackPayload(root) {
+  return {
+    category: feedbackValue(root, '[data-feedback-category]'),
+    device: feedbackValue(root, '[data-feedback-device]'),
+    browser: feedbackValue(root, '[data-feedback-browser]'),
+    build: feedbackValue(root, '[data-feedback-build]'),
+    mode: state.mode,
+    level: feedbackValue(root, '[data-feedback-level]'),
+    performance: feedbackValue(root, '[data-feedback-performance]'),
+    report: feedbackValue(root, '[data-feedback-report]')
+  };
+}
+
+function buildFeedbackDraftUrl(root) {
+  const params = new URLSearchParams({
+    title: `[Playtest]: ${feedbackSelectLabel(root)} - ${state.mode} - ${feedbackValue(root, '[data-feedback-level]')}`,
+    labels: GITHUB_ISSUE_LABELS,
+    body: buildFeedbackReport(root)
+  });
+  return `${GITHUB_ISSUE_URL}?${params.toString()}`;
+}
+
+function copyText(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const scratch = document.createElement('textarea');
+  scratch.value = text;
+  scratch.setAttribute('readonly', '');
+  scratch.style.position = 'fixed';
+  scratch.style.left = '-9999px';
+  document.body.appendChild(scratch);
+  scratch.select();
+  const copied = document.execCommand?.('copy');
+  scratch.remove();
+  return copied ? Promise.resolve() : Promise.reject(new Error('copy unavailable'));
+}
+
+function escapeAttribute(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function renderLevelComplete(details) {
