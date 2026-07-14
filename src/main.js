@@ -47,21 +47,23 @@ function render() {
   app.innerHTML = `
     <section class="topbar" aria-label="Game status">
       <div>
-        <p class="eyebrow">${levelLabel}</p>
+        <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>${levelLabel}</p>
         <h1>Word Garden</h1>
+        <p class="tagline">A little word ritual.</p>
       </div>
-      <div class="coin-pill ${coinChanged ? 'is-bumped' : ''}" aria-label="${state.coins} coins">${state.coins}</div>
+      <div class="coin-pill ${coinChanged ? 'is-bumped' : ''}" aria-label="${state.coins} coins"><span>${state.coins}</span></div>
     </section>
 
     <section class="mode-tabs" aria-label="Game mode">
-      <button class="${state.mode === 'campaign' ? 'is-active' : ''}" data-mode="campaign">Levels</button>
-      <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily">Daily</button>
+      <button class="${state.mode === 'campaign' ? 'is-active' : ''}" data-mode="campaign" aria-pressed="${state.mode === 'campaign'}">Levels</button>
+      <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily" aria-pressed="${state.mode === 'daily'}">Daily</button>
     </section>
 
     ${state.mode === 'daily' ? renderDailyStats(snapshot) : renderCampaignStats(snapshot)}
 
-    <section class="board-wrap">
+    <section class="board-wrap" aria-label="${snapshot.level.title} puzzle board">
       <div class="level-card">
+        <span class="level-card__leaf" aria-hidden="true">❧</span>
         <p>${snapshot.level.title}</p>
         <strong>${progress.solved.length}/${snapshot.level.targets.length}</strong>
       </div>
@@ -80,7 +82,7 @@ function render() {
     </section>
 
     <section class="composer" aria-label="Word builder">
-      <div class="current-word ${currentWord ? 'has-word' : ''}">${currentWord || 'TAP OR SWIPE LETTERS'}</div>
+      <div class="current-word ${currentWord ? 'has-word' : ''}" role="status" aria-live="polite">${currentWord || 'TAP OR SWIPE LETTERS'}</div>
       <div class="wheel" data-wheel>
         <svg class="swipe-guide" data-swipe-guide aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
           <polyline class="swipe-guide__path" data-swipe-path points=""></polyline>
@@ -93,9 +95,13 @@ function render() {
             const angle = (index / wheelLetters.length) * Math.PI * 2 - Math.PI / 2;
             const x = 50 + Math.cos(angle) * 34;
             const y = 50 + Math.sin(angle) * 34;
-            return `<button class="letter ${active ? 'is-active' : ''}" data-index="${index}" style="left: ${x}%; top: ${y}%;">${letter}</button>`;
+            return `<button class="letter ${active ? 'is-active' : ''}" data-index="${index}" aria-pressed="${active}" aria-label="Add ${letter}" style="left: ${x}%; top: ${y}%;">${letter}</button>`;
           })
           .join('')}
+        <div class="wheel-center" aria-hidden="true">
+          <span>grow</span>
+          <small>your word</small>
+        </div>
       </div>
       <div class="actions">
         <button data-action="clear">Clear</button>
@@ -112,11 +118,11 @@ function render() {
 
     <section class="ledger">
       <div>
-        <span>Bonus words</span>
+        <span><span class="ledger-leaf" aria-hidden="true">✿</span> Bonus words</span>
         <strong>${progress.bonusFound.length}</strong>
       </div>
-      <p>${message}</p>
-      ${feedback ? `<strong class="feedback-toast feedback-toast--${feedback.tone}" role="status">${feedback.label}</strong>` : ''}
+      <p role="status" aria-live="polite" aria-atomic="true">${message}</p>
+      ${feedback ? `<strong class="feedback-toast feedback-toast--${feedback.tone}">${feedback.label}</strong>` : ''}
     </section>
 
     ${completion ? renderLevelComplete(completion) : ''}
@@ -138,11 +144,11 @@ function renderFeedbackPanel(snapshot) {
       <button class="tester-feedback__cta" type="button" aria-expanded="false" aria-controls="tester-feedback-panel">
         Feedback
       </button>
-      <div class="tester-feedback__panel" id="tester-feedback-panel" aria-hidden="true" aria-label="Word Garden feedback">
+      <div class="tester-feedback__panel" id="tester-feedback-panel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="tester-feedback-title">
         <div class="tester-feedback__header">
           <div>
             <p>Tester Report</p>
-            <h2>Word Garden Feedback</h2>
+            <h2 id="tester-feedback-title">Word Garden Feedback</h2>
           </div>
           <button class="tester-feedback__close" type="button" data-feedback-close aria-label="Close feedback">x</button>
         </div>
@@ -203,13 +209,15 @@ function bindFeedbackEvents(snapshot) {
   const shareButton = root.querySelector('[data-feedback-share]');
   const status = root.querySelector('[data-feedback-status]');
 
-  const setOpen = (open) => {
+  const setOpen = (open, restoreFocus = false) => {
     root.classList.toggle('is-open', open);
     panel.setAttribute('aria-hidden', open ? 'false' : 'true');
     cta.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       root.querySelector('[data-feedback-level]').value = getFeedbackLevelLabel(snapshot);
       window.setTimeout(() => root.querySelector('[data-feedback-category]')?.focus(), 0);
+    } else if (restoreFocus) {
+      cta.focus();
     }
   };
 
@@ -234,7 +242,13 @@ function bindFeedbackEvents(snapshot) {
   };
 
   cta.addEventListener('click', () => setOpen(true));
-  close.addEventListener('click', () => setOpen(false));
+  close.addEventListener('click', () => setOpen(false, true));
+  panel.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setOpen(false, true);
+    }
+  });
   copyButton.addEventListener('click', async () => {
     try {
       await copyText(buildFeedbackReport(root));
@@ -477,6 +491,9 @@ function bindEvents() {
       swipePointer = getWheelPoint(event.clientX, event.clientY);
       selectLetter(Number(button.dataset.index));
     });
+    button.addEventListener('click', (event) => {
+      if (event.detail === 0) selectLetter(Number(button.dataset.index));
+    });
   });
 
   app.querySelector('[data-wheel]').addEventListener('pointerup', () => {
@@ -499,6 +516,10 @@ function bindEvents() {
       render();
     });
   });
+
+  if (completion) {
+    window.setTimeout(() => app.querySelector('.level-complete [data-action="continue"]')?.focus(), 0);
+  }
 }
 
 function selectLetter(index) {
@@ -525,7 +546,9 @@ function updateSelectionView() {
   }
 
   app.querySelectorAll('.letter').forEach((button) => {
-    button.classList.toggle('is-active', selectedIndexes.has(Number(button.dataset.index)));
+    const active = selectedIndexes.has(Number(button.dataset.index));
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
 
   updateSwipeGuide();
