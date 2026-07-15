@@ -7,34 +7,41 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { levels } from '../src/levels.js';
+import { resolveSmokeTarget } from './smoke-target.js';
 
 const ROOT = new URL('..', import.meta.url);
-const port = await chooseSmokePort();
-const url = `http://127.0.0.1:${port}`;
+const smokeTarget = resolveSmokeTarget();
+const port = smokeTarget.external ? null : await chooseSmokePort();
+const url = smokeTarget.url || `http://127.0.0.1:${port}`;
 const XVNC_DISPLAY = process.env.DISPLAY || (existsSync('/tmp/.X11-unix/X1') ? ':1' : '');
 const USE_XVNC = process.env.WORD_GARDEN_SMOKE_DISPLAY === 'xvnc' || (!process.env.WORD_GARDEN_SMOKE_DISPLAY && XVNC_DISPLAY);
 const levelOneTargets = ['PLANT', 'PLAN', 'PANT', 'ANT', 'TAP'];
 const levelTwoTargets = ['STONE', 'TONE', 'ONES', 'NOTES', 'TOE'];
 const levelFiveTargets = ['FOREST', 'FROST', 'STORE', 'ROSE', 'TOE'];
 const sequentialPuzzleOrder = levels.map((_, index) => index);
-const server = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port)], {
-  cwd: ROOT,
-  stdio: ['ignore', 'pipe', 'pipe'],
-  detached: process.platform !== 'win32'
-});
+const server = smokeTarget.external
+  ? null
+  : spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port)], {
+      cwd: ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32'
+    });
 const serverOutput = { stdout: '', stderr: '' };
 let serverError = null;
-server.on('error', (error) => {
-  serverError = error;
-});
-server.stdout.on('data', (chunk) => {
-  serverOutput.stdout += chunk.toString();
-  if (process.env.WORD_GARDEN_SMOKE_DEBUG) process.stdout.write(chunk);
-});
-server.stderr.on('data', (chunk) => {
-  serverOutput.stderr += chunk.toString();
-  if (process.env.WORD_GARDEN_SMOKE_DEBUG) process.stderr.write(chunk);
-});
+const runtimeFailures = [];
+if (server) {
+  server.on('error', (error) => {
+    serverError = error;
+  });
+  server.stdout.on('data', (chunk) => {
+    serverOutput.stdout += chunk.toString();
+    if (process.env.WORD_GARDEN_SMOKE_DEBUG) process.stdout.write(chunk);
+  });
+  server.stderr.on('data', (chunk) => {
+    serverOutput.stderr += chunk.toString();
+    if (process.env.WORD_GARDEN_SMOKE_DEBUG) process.stderr.write(chunk);
+  });
+}
 
 async function chooseSmokePort() {
   const requestedPort = Number(process.env.WORD_GARDEN_SMOKE_PORT);
@@ -93,6 +100,11 @@ async function waitForHttp(targetUrl, label) {
 }
 
 async function waitForServer() {
+  if (smokeTarget.external) {
+    await waitForHttp(url, `external Word Garden URL ${url}`);
+    return;
+  }
+
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (serverError || server.exitCode !== null || server.signalCode !== null) {
       throw new Error(`Vite dev server exited early: ${serverFailureOutput()}`);
@@ -149,7 +161,8 @@ async function launchBrowser() {
   args.push('about:blank');
 
   const browserOutput = { stdout: '', stderr: '' };
-  const child = spawn(process.env.CHROMIUM_PATH || '/usr/bin/chromium', args, {
+  const chromiumPath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : chromium.executablePath());
+  const child = spawn(chromiumPath, args, {
     cwd: ROOT,
     env: launchEnv,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -222,6 +235,7 @@ function killChild(child, signal, killGroup) {
 async function freshPage(browser, contextOptions = {}, stateOverrides = {}) {
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
+  observeRuntimeFailures(page);
   await page.goto(url);
   await page.evaluate(() => {
     window.localStorage.clear();
@@ -249,6 +263,35 @@ async function freshPage(browser, contextOptions = {}, stateOverrides = {}) {
   await page.reload();
   await page.waitForSelector('.letter');
   return { context, page };
+}
+
+function observeRuntimeFailures(page) {
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      runtimeFailures.push(`console error: ${message.text()}`);
+    }
+  });
+  page.on('pageerror', (error) => {
+    runtimeFailures.push(`page error: ${error.message}`);
+  });
+  page.on('requestfailed', (request) => {
+    runtimeFailures.push(`network request failed: ${request.method()} ${request.url()} (${request.failure()?.errorText || 'unknown error'})`);
+  });
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      runtimeFailures.push(`network response failed: ${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+}
+
+function assertNoRuntimeFailures() {
+  if (runtimeFailures.length > 0) {
+    throw new Error(formatRuntimeFailures());
+  }
+}
+
+function formatRuntimeFailures() {
+  return `Browser runtime failures:\n${runtimeFailures.join('\n')}`;
 }
 
 async function letterCenters(page) {
@@ -774,11 +817,20 @@ try {
     await expectLevelCompleteOverlay(mobileCompletion.page, 'Level 1 complete', 'Level 1 complete! +10 coins. Next: Level 2.');
     await expectCampaignJourney(mobileCompletion.page, 1);
     await mobileCompletion.context.close();
+
+    assertNoRuntimeFailures();
+  } catch (error) {
+    if (runtimeFailures.length > 0 && !error.message.startsWith('Browser runtime failures:')) {
+      throw new Error(`${error.message}\n${formatRuntimeFailures()}`, { cause: error });
+    }
+    throw error;
   } finally {
     await closeBrowser(browserHandle);
   }
 
-  console.log(`PASS: smoke gestures, visible controls, desktop level 2 progression, and mobile level 1 completion on ${url}.`);
+  console.log(
+    `PASS: smoke gestures, visible controls, desktop level 2 progression, mobile level 1 completion, and runtime diagnostics on ${url}.`
+  );
 } finally {
-  await stopProcess(server, true);
+  if (server) await stopProcess(server, true);
 }
