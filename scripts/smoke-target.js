@@ -18,3 +18,33 @@ export function resolveSmokeTarget(env = process.env) {
     url: null
   };
 }
+
+export function resolveSmokeBrowser(env = process.env, systemChromiumAvailable = false) {
+  const configuredPath = env.CHROMIUM_PATH?.trim();
+
+  if (configuredPath) {
+    return {
+      mode: 'cdp',
+      executablePath: configuredPath
+    };
+  }
+
+  if (env.CI === 'true') {
+    return {
+      mode: 'playwright',
+      executablePath: null
+    };
+  }
+
+  if (systemChromiumAvailable) {
+    return {
+      mode: 'cdp',
+      executablePath: '/usr/bin/chromium'
+    };
+  }
+
+  return {
+    mode: 'playwright',
+    executablePath: null
+  };
+}

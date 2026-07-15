@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { levels } from '../src/levels.js';
-import { resolveSmokeTarget } from './smoke-target.js';
+import { resolveSmokeBrowser, resolveSmokeTarget } from './smoke-target.js';
 
 const ROOT = new URL('..', import.meta.url);
 const smokeTarget = resolveSmokeTarget();
@@ -133,9 +133,25 @@ function serverFailureOutput() {
 }
 
 async function launchBrowser() {
+  const browserTarget = resolveSmokeBrowser(process.env, existsSync('/usr/bin/chromium'));
+  const launchEnv = USE_XVNC ? { ...process.env, DISPLAY: XVNC_DISPLAY } : process.env;
+
+  if (browserTarget.mode === 'playwright') {
+    try {
+      const browser = await chromium.launch({
+        headless: !USE_XVNC,
+        chromiumSandbox: false,
+        env: launchEnv,
+        args: ['--disable-dev-shm-usage']
+      });
+      return { browser, child: null, userDataDir: null };
+    } catch (error) {
+      throw new Error(`Failed to launch Playwright-managed Chromium: ${error.message}`, { cause: error });
+    }
+  }
+
   const debugPort = await chooseCdpPort();
   const userDataDir = await mkdtemp(path.join(tmpdir(), 'word-garden-smoke-'));
-  const launchEnv = USE_XVNC ? { ...process.env, DISPLAY: XVNC_DISPLAY } : process.env;
   const args = [
     '--no-sandbox',
     '--disable-dev-shm-usage',
@@ -161,8 +177,7 @@ async function launchBrowser() {
   args.push('about:blank');
 
   const browserOutput = { stdout: '', stderr: '' };
-  const chromiumPath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : chromium.executablePath());
-  const child = spawn(chromiumPath, args, {
+  const child = spawn(browserTarget.executablePath, args, {
     cwd: ROOT,
     env: launchEnv,
     stdio: ['ignore', 'pipe', 'pipe']
