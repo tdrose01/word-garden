@@ -63,6 +63,28 @@ test('level 1 grid placements do not create coordinate letter conflicts', () => 
   }
 });
 
+test('Brook grid keeps secondary words compactly crossed with the base word', () => {
+  const placements = buildGrid(levels[1].targets);
+  const cells = new Map();
+
+  placements.forEach((placement) => {
+    Array.from(placement.word).forEach((letter, index) => {
+      const x = placement.x + (placement.direction === 'across' ? index : 0);
+      const y = placement.y + (placement.direction === 'down' ? index : 0);
+      const key = `${x}:${y}`;
+      assert.equal(cells.get(key) ?? letter, letter, `conflicting letter at ${key}`);
+      cells.set(key, letter);
+    });
+  });
+
+  const xs = [...cells.keys()].map((key) => Number(key.split(':')[0]));
+  const ys = [...cells.keys()].map((key) => Number(key.split(':')[1]));
+  assert.equal(Math.max(...xs) - Math.min(...xs) + 1, 6);
+  assert.equal(Math.max(...ys) - Math.min(...ys) + 1, 5);
+  assert.equal(placements.filter((placement) => placement.direction === 'across').length, 2);
+  assert.equal(placements.filter((placement) => placement.direction === 'down').length, 3);
+});
+
 test('campaign target words each add visible board space', () => {
   for (const level of levels) {
     const occupied = new Set();

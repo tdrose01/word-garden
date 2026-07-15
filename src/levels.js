@@ -361,7 +361,9 @@ export function buildGrid(targets) {
       return;
     }
 
-    const placement = findCleanDownPlacement(targets[0], word, occupied);
+    const placement = placements.length < 3
+      ? findCleanDownPlacement(targets[0], word, occupied)
+      : findCompactCrossPlacement(word, placements, occupied);
     if (placement) {
       addPlacement(placement);
       return;
@@ -381,23 +383,68 @@ export function buildGrid(targets) {
 function findCleanDownPlacement(baseWord, word, occupied) {
   for (let wordIndex = 0; wordIndex < word.length; wordIndex += 1) {
     for (let baseIndex = 0; baseIndex < baseWord.length; baseIndex += 1) {
-      if (baseWord[baseIndex] !== word[wordIndex]) {
-        continue;
-      }
-
+      if (baseWord[baseIndex] !== word[wordIndex]) continue;
       const placement = {
         word,
         x: baseIndex,
         y: 2 - wordIndex,
         direction: 'down'
       };
-
-      if (canPlace(placement, occupied)) {
-        return placement;
-      }
+      if (canPlace(placement, occupied)) return placement;
     }
   }
   return null;
+}
+
+function findCompactCrossPlacement(word, placements, occupied) {
+  const candidates = [];
+
+  placements.forEach((existing) => {
+    Array.from(existing.word).forEach((existingLetter, existingIndex) => {
+      const existingX = existing.x + (existing.direction === 'across' ? existingIndex : 0);
+      const existingY = existing.y + (existing.direction === 'down' ? existingIndex : 0);
+
+      Array.from(word).forEach((letter, wordIndex) => {
+        if (letter !== existingLetter) return;
+        const direction = existing.direction === 'across' ? 'down' : 'across';
+        const placement = {
+          word,
+          x: existingX - (direction === 'across' ? wordIndex : 0),
+          y: existingY - (direction === 'down' ? wordIndex : 0),
+          direction
+        };
+        if (canPlace(placement, occupied)) candidates.push(placement);
+      });
+    });
+  });
+
+  return candidates.sort((left, right) => comparePlacementFit(left, right, placements))[0] ?? null;
+}
+
+function comparePlacementFit(left, right, placements) {
+  const leftBounds = getPlacementBounds([...placements, left]);
+  const rightBounds = getPlacementBounds([...placements, right]);
+  const leftArea = leftBounds.width * leftBounds.height;
+  const rightArea = rightBounds.width * rightBounds.height;
+
+  return leftArea - rightArea
+    || Math.max(leftBounds.width, leftBounds.height) - Math.max(rightBounds.width, rightBounds.height)
+    || leftBounds.width - rightBounds.width
+    || left.y - right.y
+    || left.x - right.x;
+}
+
+function getPlacementBounds(placements) {
+  const cells = placements.flatMap((placement) => Array.from(placement.word).map((_, index) => ({
+    x: placement.x + (placement.direction === 'across' ? index : 0),
+    y: placement.y + (placement.direction === 'down' ? index : 0)
+  })));
+  const xs = cells.map((cell) => cell.x);
+  const ys = cells.map((cell) => cell.y);
+  return {
+    width: Math.max(...xs) - Math.min(...xs) + 1,
+    height: Math.max(...ys) - Math.min(...ys) + 1
+  };
 }
 
 function canPlace(placement, occupied) {
