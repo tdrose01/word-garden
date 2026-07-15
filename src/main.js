@@ -1,3 +1,7 @@
+import '@fontsource/nunito/latin-500.css';
+import '@fontsource/nunito/latin-700.css';
+import '@fontsource/nunito/latin-900.css';
+import '@fontsource/fraunces/latin-700.css';
 import './style.css';
 import {
   createSnapshot,
