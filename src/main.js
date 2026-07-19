@@ -717,6 +717,9 @@ function handleAction(action) {
     render();
   }
   if (action === 'hint') {
+    // A hint starts a fresh attempt. Keeping an in-progress swipe here can
+    // leave an invalid word (for example, NETOE) stuck in the composer.
+    selection = [];
     completion = null;
     const result = useHint(state);
     state = result.state;
