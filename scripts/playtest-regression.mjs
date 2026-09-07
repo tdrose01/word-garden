@@ -9,10 +9,21 @@ import { levels, getDailyLevel } from '../src/levels.js';
 import { loadState } from '../src/game.js';
 import { createBackup } from '../src/persistence.js';
 export async function runPlaytestRegression(browser, url) {
+ const failures=[];
+ const assertNoRuntimeFailures=()=>assert.deepEqual(failures,[], 'Feature browser runtime/network failures');
+ const observedContext=async (options={}, label='feature') => {
+  const context=await browser.newContext(options);
+  context.on('page',page=>{
+   page.on('console',message=>{if(message.type()==='error') failures.push(`${label}: console error: ${message.text()}`);});
+   page.on('pageerror',error=>failures.push(`${label}: page error: ${error.message}`));
+   page.on('requestfailed',request=>failures.push(`${label}: request failed: ${request.method()} ${request.url()} (${request.failure()?.errorText || 'unknown error'})`));
+   page.on('response',response=>{if(response.status()>=400) failures.push(`${label}: HTTP ${response.status()}: ${response.request().method()} ${response.url()}`);});
+  });
+  return context;
+ };
  await mkdir('state/screenshots',{recursive:true});
  for (const viewport of [{width:1366,height:768},{width:320,height:640}]) {
-  const context=await browser.newContext({viewport}); const page=await context.newPage();
-  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+  const context=await observedContext({viewport},`feature ${viewport.width}`); const page=await context.newPage();
   await page.goto(url);
   const safeWheel = async targets => {
     const letters=await page.locator('.letter').allTextContents();
@@ -51,12 +62,12 @@ export async function runPlaytestRegression(browser, url) {
   const download=await downloadPromise; assert.equal(download.suggestedFilename(),'word-garden-backup.json');
   const downloaded=await readFile(await download.path(),'utf8');
   assert.deepEqual(JSON.parse(downloaded).state,JSON.parse(planted));
-  const portableContext=await browser.newContext({viewport}); const portable=await portableContext.newPage();
+  const portableContext=await observedContext({viewport},`portable ${viewport.width}`); const portable=await portableContext.newPage();
   await portable.goto(url); await portable.locator('[data-action="settings"]').click();
   await portable.locator('[data-import-backup]').setInputFiles({name:'download.json',mimeType:'application/json',buffer:Buffer.from(downloaded)});
   await portable.locator('[data-action="confirm-import"]').click(); await portable.reload();
   assert.deepEqual(await portable.evaluate(()=>JSON.parse(localStorage.getItem('word-garden-state'))),JSON.parse(planted));
-  await portableContext.close();
+  assertNoRuntimeFailures(); await portableContext.close();
   const upload = async data => page.locator('[data-import-backup]').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(data)});
   await upload('{'); await page.waitForFunction(()=>document.querySelector('.save-controls').textContent.includes('Invalid backup'));
   assert.equal(await page.evaluate(()=>localStorage.getItem('word-garden-state')),planted);
@@ -89,18 +100,67 @@ export async function runPlaytestRegression(browser, url) {
   assert.match(await page.locator('.coin-pill').innerText(),/77/);
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('word-garden-state')).coins),77);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-  assert.deepEqual(errors,[]); await context.close();
+  assertNoRuntimeFailures(); await context.close();
  }
- const deniedContext=await browser.newContext();
+ // Separate rich fixture keeps the zero-seed and replacement tests above intact.
+ const richContext=await observedContext({viewport:{width:1366,height:768}},'rich backup source');
+ const rich=await richContext.newPage(); await rich.goto(url);
+ const history=loadState({getItem:()=>null});
+ const yesterday=new Date(); yesterday.setUTCDate(yesterday.getUTCDate()-1);
+ const yesterdayKey=yesterday.toISOString().slice(0,10);
+ history.dailyStats={...history.dailyStats,streak:2,bestStreak:3,totalCompletions:4,lastCompletedDate:yesterdayKey,objectiveDates:[yesterdayKey],reward:12};
+ await rich.evaluate(value=>localStorage.setItem('word-garden-state',JSON.stringify(value)),history); await rich.reload();
+ const solve=async word=>{
+  for(const letter of word) await rich.locator(`.letter[aria-label="Add ${letter}"]:not(.is-active)`).first().click();
+  await rich.locator('[data-action="submit"]').click();
+ };
+ const hint=async()=>{
+  await rich.locator('[data-action="hint"]').click();
+  await rich.locator('#hint-word').selectOption('1');
+  await rich.locator('[data-action="buy-clue"]').click();
+ };
+ await solve(levels[0].targets[0]); await hint();
+ await rich.locator('[data-mode="daily"]').click();
+ await solve(getDailyLevel().targets[0]); await hint();
+ await rich.locator('[data-action="garden"]').click();
+ await rich.locator('[data-plant="rose"]').click(); await rich.locator('[data-plot="0"]').click();
+ await rich.locator('[data-action="close-panel"]').click();
+ await rich.locator('[data-action="settings"]').click();
+ await rich.locator('[data-setting="sound"]').click(); await rich.locator('[data-setting="haptics"]').click();
+ const expected=await rich.evaluate(()=>JSON.parse(localStorage.getItem('word-garden-state')));
+ assert.equal(expected.solved.length,1); assert.ok(expected.revealed.length>0);
+ assert.equal(expected.daily.solved.length,1); assert.ok(expected.daily.revealed.length>0);
+ assert.equal(expected.daily.completed,false);
+ assert.deepEqual(expected.dailyStats,history.dailyStats);
+ assert.deepEqual(expected.settings,{sound:true,haptics:false});
+ assert.equal(expected.garden.plots[0].plantId,'rose');
+ const richDownloadPromise=rich.waitForEvent('download'); await rich.locator('[data-action="download-backup"]').click();
+ const richDownload=await richDownloadPromise;
+ const richBytes=await readFile(await richDownload.path());
+ assert.deepEqual(JSON.parse(richBytes.toString('utf8')).state,expected);
+ const freshContext=await observedContext({viewport:{width:1366,height:768}},'rich backup destination');
+ const fresh=await freshContext.newPage(); await fresh.goto(url);
+ assert.equal(await fresh.evaluate(()=>localStorage.getItem('word-garden-state')),null);
+ await fresh.locator('[data-action="settings"]').click();
+ await fresh.locator('[data-import-backup]').setInputFiles({name:'rich-download.json',mimeType:'application/json',buffer:richBytes});
+ await fresh.locator('[data-action="confirm-import"]').click();
+ assert.deepEqual(await fresh.evaluate(()=>JSON.parse(localStorage.getItem('word-garden-state'))),expected);
+ await fresh.reload();
+ assert.deepEqual(await fresh.evaluate(()=>JSON.parse(localStorage.getItem('word-garden-state'))),expected);
+ assert.equal(await fresh.locator('.level-card strong').textContent(),`1/${getDailyLevel().targets.length}`);
+ await fresh.locator('[data-mode="campaign"]').click();
+ assert.equal(await fresh.locator('.level-card strong').textContent(),`1/${levels[0].targets.length}`);
+ assertNoRuntimeFailures(); await freshContext.close(); await richContext.close();
+ const deniedContext=await observedContext({},'denied storage');
  await deniedContext.addInitScript(()=>Object.defineProperty(window,'localStorage',{get(){throw new Error('SecurityError');}}));
- const denied=await deniedContext.newPage(); const deniedErrors=[];
- denied.on('pageerror',e=>deniedErrors.push(e.message));
+ const denied=await deniedContext.newPage();
  await denied.goto(url);
  assert.match(await denied.locator('.ledger').innerText(),/Could not read browser progress/);
  await denied.locator('[data-action="settings"]').click(); await denied.locator('[data-action="save-progress"]').click();
  assert.match(await denied.locator('.save-controls [data-save-status]').innerText(),/^Not saved/);
- assert.deepEqual(deniedErrors,[]); await deniedContext.close();
- console.log('PASS: Chromebook and 320px phone answer labels, planting/inspection/economy, manual save, download, import preview/cancel/replace/reload/rejection/storage failure; screenshots in state/screenshots.');
+ assertNoRuntimeFailures(); await deniedContext.close();
+ assertNoRuntimeFailures();
+ console.log('PASS: rich downloaded backup preserves partial campaign/daily solves and hints, daily history, settings and garden in a fresh context after reload; zero console/page/request/HTTP errors in every feature context. Chromebook and 320px phone answer labels, planting/inspection/economy, manual save, download, import preview/cancel/replace/reload/rejection/storage failure; screenshots in state/screenshots.');
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
  const executablePath=process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
