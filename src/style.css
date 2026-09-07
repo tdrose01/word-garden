@@ -1231,7 +1231,7 @@ body[data-page-scroll="true"] { overflow-y: auto; }
 .current-word, .current-word.has-word { grid-area: word; height: 26px; min-height: 26px; font-size: 16px; width: 100%; }
 .current-word:not(.has-word) { font-size: 11px; letter-spacing: .04em; }
 .wheel { grid-area: wheel; width: 158px; max-width: none; box-shadow: inset 0 0 0 5px #ffffff50, 0 5px 16px #09211e20; }
-.letter { font-size: 21px; box-shadow: inset 0 -2px 0 #18342c1f, 0 3px 8px #18342c1f; }
+.letter { font-size: calc(var(--letter-size) * .48); box-shadow: inset 0 -2px 0 #18342c1f, 0 3px 8px #18342c1f; }
 .actions, .tools { grid-template-columns: 1fr; gap: 5px; }
 .actions { grid-area: actions; }
 .tools { grid-area: tools; }

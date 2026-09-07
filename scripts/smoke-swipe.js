@@ -841,6 +841,53 @@ try {
       await expectLevelCompleteOverlay(canopy.page, 'Level 5 complete', 'Level 5 complete! Milestone bonus: +35 coins. Next: Level 6.');
       await canopy.context.close();
     }
+    // Issue 22: the six-letter Moss Trail wheel used to stay 158px wide even
+    // with spare room. Verify real touch input near target edges, not just a
+    // synthetic pointer event, and retain the whole board on compact phones.
+    for (const viewport of [{width:390,height:844},{width:360,height:640},{width:320,height:568},{width:900,height:900}]) {
+      const isMobile = viewport.width < 500;
+      const pollen = await freshPage(browser, {viewport,isMobile,hasTouch:true}, {levelIndex:8,campaign:{completedLevels:8,bestRun:8,lastCompletedLevelId:8,puzzleOrder:sequentialPuzzleOrder}});
+      const label = `Moss Trail level 9 ${viewport.width}x${viewport.height}`;
+      await expectBoardAndWheelTogether(pollen.page, label);
+      const geometry = await pollen.page.evaluate(() => ({
+        wheel: document.querySelector('.wheel').getBoundingClientRect().width,
+        target: document.querySelector('.letter').getBoundingClientRect().width,
+        controls: [...document.querySelectorAll('.tools button, .actions button')].map(button => button.getBoundingClientRect().width)
+      }));
+      if (geometry.wheel < 200 || geometry.target < 50 || geometry.controls.some(width => width < 44)) throw new Error(`${label} cramped wheel or controls: ${JSON.stringify(geometry)}`);
+      const before = await letterCenters(pollen.page);
+      const first = before.at(0);
+      if (!first) throw new Error(`${label} has no letters`);
+      await pollen.page.touchscreen.tap(first.x, first.y);
+      const after = await letterCenters(pollen.page);
+      if (before.some((point,index) => !after[index] || Math.hypot(point.x-after[index].x,point.y-after[index].y)>1)) throw new Error(`${label} wheel moved during selection`);
+      await pollen.page.locator('[data-action="clear"]').tap();
+      await pollen.page.locator('[data-action="shuffle"]').tap();
+      await expectBoardAndWheelTogether(pollen.page, `${label} after shuffle`);
+      const path = spellPath(await letterCenters(pollen.page), 'POLLEN');
+      const box = await pollen.page.locator('.wheel').boundingBox();
+      if (!box) throw new Error(`${label} wheel disappeared`);
+      const cdp = await pollen.context.newCDPSession(pollen.page);
+      for (const [index, point] of path.entries()) {
+        const angle = Math.atan2(point.y-(box.y+box.height/2),point.x-(box.x+box.width/2));
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: index === 0 ? 'touchStart' : 'touchMove',
+          touchPoints: [{x:point.x+Math.cos(angle)*20,y:point.y+Math.sin(angle)*20}]
+        });
+      }
+      await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
+      await cdp.detach();
+      await expectProgress(pollen.page, '1/5');
+      await expectBoardAndWheelTogether(pollen.page, `${label} after edge swipe`);
+      // Repeated resize/orientation changes must not accumulate wheel growth.
+      await pollen.page.setViewportSize({width:viewport.height,height:viewport.width});
+      await pollen.page.setViewportSize(viewport);
+      await expectBoardAndWheelTogether(pollen.page, `${label} after orientation round trip`);
+      const resizedWidth = await pollen.page.locator('.wheel').evaluate(el => el.getBoundingClientRect().width);
+      if (Math.abs(resizedWidth-geometry.wheel)>1) throw new Error(`${label} wheel size drifted after resize`);
+      console.log(`PASS: ${label}, wheel ${geometry.wheel}px, targets ${geometry.target}px, native edge swipe and stable resize.`);
+      await pollen.context.close();
+    }
     // Every shipped campaign shape must fit without panning on a compact phone.
     const matrix = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true});
     for (let index=0; index<levels.length; index++) {

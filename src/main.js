@@ -831,24 +831,10 @@ function fitBoard() {
   const boardRows = Number(app.querySelector('.board')?.style.getPropertyValue('--rows'));
   app.dataset.compactBoard = boardRows >= 10 && window.innerHeight < 760 ? 'true' : 'false';
   delete document.body.dataset.pageScroll;
-  const wheel = app.querySelector('.wheel');
-  const letters = wheel?.querySelectorAll('.letter');
-  if (letters?.length > 1) {
-    const letterSize = parseFloat(getComputedStyle(letters[0]).width);
-    // Allow both neighboring buttons to be selected at once, plus a clear gap.
-    // The ring grows with the letter count, without wasting space outside it.
-    const radius = Math.max(52, (letterSize * 1.08 + 4) / (2 * Math.sin(Math.PI / letters.length)));
-    const diameter = Math.ceil(radius * 2 + letterSize * 1.08 + 6);
-    wheel.style.width = `${diameter}px`;
-    wheel.style.minWidth = `${diameter}px`;
-    letters.forEach((letter, index) => {
-      const angle = index / letters.length * Math.PI * 2 - Math.PI / 2;
-      letter.style.left = `${50 + Math.cos(angle) * radius / diameter * 100}%`;
-      letter.style.top = `${50 + Math.sin(angle) * radius / diameter * 100}%`;
-    });
-  }
   const viewport = app.querySelector('.board-viewport');
   const board = app.querySelector('.board');
+  const wheel = app.querySelector('.wheel');
+  const letters = wheel?.querySelectorAll('.letter');
   if (!viewport || !board) return;
   const styles = getComputedStyle(board);
   const cols = Number(board.style.getPropertyValue('--cols'));
@@ -856,9 +842,40 @@ function fitBoard() {
   const gap = parseFloat(styles.gap);
   const paddingX = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
   const paddingY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+  const minimumTile = window.innerWidth < 350 ? 22 : 24;
+  if (letters?.length > 1) {
+    const placeLetters = (size, radius) => {
+      const diameter = Math.ceil(radius * 2 + size * 1.08 + 6);
+      wheel.style.setProperty('--letter-size', `${size}px`);
+      wheel.style.width = `${diameter}px`;
+      wheel.style.minWidth = `${diameter}px`;
+      letters.forEach((letter, index) => {
+        const angle = index / letters.length * Math.PI * 2 - Math.PI / 2;
+        letter.style.left = `${50 + Math.cos(angle) * radius / diameter * 100}%`;
+        letter.style.top = `${50 + Math.sin(angle) * radius / diameter * 100}%`;
+      });
+      return diameter;
+    };
+    // Wheel + board height is a fixed budget. Measure it without temporarily
+    // shrinking the wheel: transient reflow can scroll-anchor a solved board
+    // out of view when returning from replay. Reserve both 44px tool columns.
+    const minRadius = size => Math.max(52, (size * 1.08 + 4) / (2 * Math.sin(Math.PI / letters.length)));
+    const composer = app.querySelector('.composer');
+    const columnGap = parseFloat(getComputedStyle(composer).columnGap);
+    const boardMinimum = rows * minimumTile + gap * (rows - 1) + paddingY;
+    const maxDiameter = Math.floor(Math.min(
+      composer.clientWidth - 88 - columnGap * 2,
+      wheel.getBoundingClientRect().height + viewport.clientHeight - boardMinimum
+    ));
+    // Prefer generous targets and a wider ring even on short, six-letter
+    // puzzles. Only unusually dense boards fall back toward the 44px baseline.
+    let size = window.innerHeight >= 760 ? 60 : 52;
+    while (size > 44 && Math.ceil(minRadius(size) * 2 + size * 1.08 + 6) > maxDiameter) size--;
+    const radius = Math.max(minRadius(size), Math.min(76, (maxDiameter - size * 1.08 - 6) / 2));
+    placeLetters(size, radius);
+  }
   const fitWidth = (viewport.clientWidth - paddingX - gap * (cols - 1)) / cols;
   const fitHeight = (viewport.clientHeight - paddingY - gap * (rows - 1)) / rows;
-  const minimumTile = window.innerWidth < 350 ? 22 : 24;
   const tileSize = Math.min(46, Math.floor(fitWidth), Math.max(minimumTile, Math.floor(fitHeight)));
   board.style.setProperty('--fit-tile-size', `${tileSize}px`);
   // Exceptionally short screens can extend the page, but the complete board
