@@ -38,8 +38,14 @@ let selectionChangedDuringSwipe = false;
 let swipePointer = null;
 let feedback = null;
 let previousCoins = state.coins;
+let panel = null;
+let hintTarget = null;
+let hintCell = null;
+let panelReturnFocus = 'hint';
+let renderedDailyDate = state.mode === 'daily' ? getProgress(state).dateKey : null;
 
 function render() {
+  refreshDaily(false);
   const snapshot = createSnapshot(state);
   const progress = getProgress(state);
   const levelLabel = state.mode === 'daily' ? 'Daily' : `Level ${snapshot.campaignStats.currentLevel}`;
@@ -53,7 +59,7 @@ function render() {
       <div>
         <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>${levelLabel}</p>
         <h1>Word Garden</h1>
-        <p class="tagline">A little word ritual.</p>
+
       </div>
       <div class="coin-pill ${coinChanged ? 'is-bumped' : ''}" aria-label="${state.coins} coins"><span>${state.coins}</span></div>
     </section>
@@ -63,13 +69,15 @@ function render() {
       <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily" aria-pressed="${state.mode === 'daily'}">Daily</button>
     </section>
 
-    ${state.mode === 'daily' ? renderDailyStats(snapshot) : renderCampaignStats(snapshot)}
+    ${renderCompactProgress(snapshot)}
+    ${renderGarden(snapshot.gardenStats)}
 
     <section class="board-wrap" aria-label="${snapshot.level.title} puzzle board">
       <div class="level-card">
         <span class="level-card__leaf" aria-hidden="true">❧</span>
         <p>${snapshot.level.title}</p>
         <strong>${progress.solved.length}/${snapshot.level.targets.length}</strong>
+        <button class="enlarge-board" data-action="board" aria-label="Enlarge puzzle board">Enlarge board</button>
       </div>
       <div class="board" style="--cols: ${maxX + 1}; --rows: ${maxY + 1};">
         ${snapshot.cells
@@ -78,7 +86,7 @@ function render() {
               <div
                 class="tile ${cell.letter ? 'is-filled' : ''} ${cell.solved ? 'is-solved' : ''} ${cell.revealed ? 'is-revealed' : ''}"
                 style="grid-column: ${cell.x + 1}; grid-row: ${cell.y + 1}; --pop-delay: ${(cell.x + cell.y) * 18}ms;"
-              >${cell.letter}</div>
+               aria-label="Row ${cell.y + 1}, column ${cell.x + 1}: ${cell.letter || 'blank'}">${renderSlotNumber(snapshot, cell)}${cell.letter}</div>
             `
           )
           .join('')}
@@ -116,8 +124,8 @@ function render() {
 
     <section class="tools">
       <button data-action="shuffle">Shuffle</button>
-      <button data-action="hint">Hint 15</button>
-      <button data-action="reset">Reset</button>
+      <button data-action="hint">Hints · from 5</button>
+      <button data-action="settings">Settings</button>
     </section>
 
     <section class="ledger">
@@ -132,13 +140,118 @@ function render() {
     ${completion ? renderLevelComplete(completion) : ''}
 
     ${renderFeedbackPanel(snapshot)}
+    ${renderGamePanel(snapshot)}
   `;
 
   bindEvents();
   bindFeedbackEvents(snapshot);
+  bindGamePanel();
   updateSwipeGuide();
   fitBoard();
   previousCoins = state.coins;
+}
+
+
+function renderSlotNumber(snapshot, cell) {
+  const slots = snapshot.placements.flatMap((slot, index) => slot.x === cell.x && slot.y === cell.y ? [index + 1] : []);
+  return slots.length ? `<small class="slot-number" aria-hidden="true">${slots.join('/')}</small>` : '';
+}
+
+function renderCompactProgress(snapshot) {
+  const stats = snapshot.campaignStats;
+  const percent = state.mode === 'daily' ? Math.round(snapshot.progress.solved.length / snapshot.level.targets.length * 100) : stats.pathPercent;
+  return `<button class="compact-progress" data-action="progress" aria-label="View detailed progress">
+    <span>${state.mode === 'daily' ? `Daily · ${snapshot.dailyStats.streak} day streak` : `${stats.pack.title} · ${stats.currentLevel}/${stats.totalLevels}`}</span>
+    <span class="campaign-meter"><span style="width:${percent}%"></span></span><span>${percent}% <span aria-hidden="true">›</span></span>
+  </button>`;
+}
+
+function renderGardenScene(stats = {}) {
+  const flowers = Math.min(stats.flowers || 0, 24);
+  const trees = Math.min(stats.trees || 0, 4);
+  const butterflies = Math.min(stats.butterflies || 0, 4);
+  const area = (stats.completedPacks || 0) % 4;
+  const sky = ['#e4efdb', '#c9e8dc', '#ddd8ed', '#f3dfc0'][area];
+  return `<svg class="garden-scene" viewBox="0 0 360 110" aria-hidden="true">
+    <rect width="360" height="110" rx="12" fill="${sky}"/>
+    <circle cx="300" cy="24" r="14" fill="#f3c75d"/>
+    <path d="M0 86 Q90 60 180 84 T360 76 V110 H0Z" fill="#96ba7b"/>
+    ${stats.completedPacks ? '<path d="M156 110 Q220 74 183 63" fill="none" stroke="#edcf99" stroke-width="14"/><path d="M8 76H352" stroke="#fff4da" stroke-width="3" stroke-dasharray="5 11"/>' : ''}
+    ${Array.from({length:trees}, (_,i) => `<g transform="translate(${28+i*93},12)"><path d="M0 70V29" stroke="#896445" stroke-width="6"/><circle cy="24" r="20" fill="#447b54"/><circle cx="-11" cy="35" r="14" fill="#538b5b"/><circle cx="12" cy="35" r="15" fill="#629562"/></g>`).join('')}
+    ${Array.from({length:flowers}, (_,i) => {const x=14+(i*47)%334,y=81+(i%3)*8;return `<g class="garden-flower" transform="translate(${x},${y})"><path d="M0 15V0M0 10L-5 6" stroke="#396848" stroke-width="2"/><g fill="${['#d56e66','#f6ce70','#a580bd'][i%3]}"><circle cx="-4" r="4"/><circle cx="4" r="4"/><circle cy="-4" r="4"/><circle cy="4" r="4"/></g><circle r="2.5" fill="#fff1b8"/></g>`;}).join('')}
+    ${Array.from({length:butterflies},(_,i)=>`<g transform="translate(${82+i*63},${26+(i%2)*17})"><path d="M0 0C-18-15-17 12 0 5C17 12 18-15 0 0" fill="#c4779e"/><path d="M0-2V8" stroke="#604650" stroke-width="2"/></g>`).join('')}
+    ${Array.from({length: Math.min(stats.completedPacks || 0, 8)}, (_,i) => `<rect x="${6+i*44}" y="102" width="32" height="4" rx="2" fill="#f4e2b5"/>`).join('')}
+    ${!flowers ? '<path d="M180 98V82M180 88Q160 74 167 89Q173 94 180 92M180 85Q197 67 193 84Q188 91 180 89" fill="#447b54" stroke="#447b54" stroke-width="2"/>' : ''}
+  </svg>`;
+}
+
+function renderGarden(stats = {}) {
+  return `<button class="garden-peek" data-garden-growth="${stats.totalCompletions || 0}" data-action="garden" aria-label="Open your garden, ${stats.flowers || 0} flowers">
+    ${renderGardenScene(stats)}<span><strong>Your garden</strong><small>${stats.flowers || 0} flowers · ${stats.trees || 0} trees <span aria-hidden="true">›</span></small></span>
+  </button>`;
+}
+
+function renderGamePanel(snapshot) {
+  if (!panel) return '';
+  let title = 'Settings';
+  let content = '<p>Your progress is saved automatically on this device.</p><button data-action="reset">Reset progress…</button>';
+  if (panel === 'confirm-reset') {
+    title = 'Reset your garden?';
+    content = '<p>This clears your levels, coins, daily streaks and garden on this device.</p><button data-action="confirm-reset" class="danger">Yes, reset all progress</button>';
+  }
+  if (panel === 'board') {
+    title = 'Your puzzle, up close';
+    const cols = Math.max(...snapshot.cells.map(cell => cell.x)) + 1;
+    const rows = Math.max(...snapshot.cells.map(cell => cell.y)) + 1;
+    content = `<p>Scroll to explore the whole board. Numbers match the words in Hints.</p><div class="expanded-board-scroll" tabindex="0" role="region" aria-label="Enlarged puzzle board, scroll to see every tile"><div class="expanded-board" style="--cols:${cols};--rows:${rows}">${snapshot.cells.map(cell => `<div class="tile ${cell.solved ? 'is-solved' : ''} ${cell.revealed ? 'is-revealed' : ''}" style="grid-column:${cell.x+1};grid-row:${cell.y+1}" aria-label="Row ${cell.y+1}, column ${cell.x+1}: ${cell.letter || 'blank'}">${renderSlotNumber(snapshot, cell)}${cell.letter}</div>`).join('')}</div></div>`;
+  }
+  if (panel === 'progress') {
+    title = 'Your progress';
+    content = state.mode === 'daily' ? renderDailyStats(snapshot) : renderCampaignStats(snapshot);
+  }
+  if (panel === 'garden') {
+    title = 'Your growing garden';
+    const stats = snapshot.gardenStats || {};
+    content = `${renderGardenScene(stats)}<p>${stats.flowers || 0} flowers · ${stats.trees || 0} trees · ${stats.butterflies || 0} butterflies</p><p>${stats.completedPacks || 0} garden areas complete</p><p>Every completed puzzle plants a flower. Five completions grow a tree; ten welcome a butterfly. Finish a pack to transform your garden.</p>${stats.nextUnlock ? `<p>${stats.nextUnlock.remaining} puzzles until ${escapeAttribute(stats.nextUnlock.label)}.</p>` : ''}`;
+  }
+  if (panel === 'hint') {
+    title = 'A little help';
+    const options = snapshot.hintOptions || { words: [], cells: [] };
+    const free = options.freeRescueAvailable && state.coins < 5;
+    content = `<p>${state.coins} coins${free ? ' · One free rescue available on this puzzle' : ''}</p>
+      <label for="hint-word">Choose a word for a letter clue</label>
+      <select id="hint-word"><option value="">Choose a word…</option>${options.words.filter(word => word.available).map(word => `<option value="${word.targetIndex}" ${hintTarget === word.targetIndex ? 'selected' : ''}>${escapeAttribute(word.label)} ${word.direction} (row ${word.row}, col ${word.col}) · ${escapeAttribute(word.pattern || '')}</option>`).join('')}</select>
+      <p class="panel-note">Reveals its next hidden letter. The small board numbers identify each word.</p>
+      <button data-action="buy-clue" ${hintTarget === null || (!free && state.coins < 5) ? 'disabled' : ''}>${free ? 'Use free clue' : 'Letter clue · 5 coins'}</button>
+      <hr/><p>Or choose a blank tile to reveal exactly that letter.</p>
+      <div class="hint-board" style="--cols:${Math.max(...snapshot.cells.map(c => c.x))+1}">${snapshot.cells.map(cell => `<button class="hint-tile ${hintCell === `${cell.x}:${cell.y}` ? 'is-selected' : ''}" style="grid-column:${cell.x+1};grid-row:${cell.y+1}" data-hint-cell="${cell.x}:${cell.y}" aria-pressed="${hintCell === `${cell.x}:${cell.y}`}" aria-label="Row ${cell.y+1}, column ${cell.x+1}: ${cell.letter || 'blank'}" ${cell.letter ? 'disabled' : ''}>${cell.letter || '·'}</button>`).join('')}</div>
+      <button data-action="buy-reveal" ${hintCell === null || (!free && state.coins < 10) ? 'disabled' : ''}>${free ? 'Use free reveal' : 'Reveal tile · 10 coins'}</button>
+      <p class="panel-note">Letters already on the board still belong in your word. Build and submit the whole word on the wheel.</p>`;
+  }
+  return `<dialog class="game-panel" aria-labelledby="game-panel-title"><h2 id="game-panel-title">${title}</h2><button class="panel-close" data-action="close-panel" autofocus>${panel === 'confirm-reset' ? 'Cancel' : 'Close'}</button><div class="game-panel__content">${content}</div></dialog>`;
+}
+
+function closeGamePanel() {
+  panel = null;
+  render();
+  app.querySelector(`[data-action="${panelReturnFocus}"]`)?.focus();
+}
+
+function bindGamePanel() {
+  const dialog = app.querySelector('.game-panel');
+  if (!dialog) return;
+  dialog.showModal();
+  dialog.addEventListener('cancel', event => { event.preventDefault(); closeGamePanel(); });
+  dialog.querySelector('#hint-word')?.addEventListener('change', event => {
+    hintTarget = event.target.value === '' ? null : Number(event.target.value);
+    render();
+    app.querySelector('#hint-word')?.focus();
+  });
+  dialog.querySelectorAll('[data-hint-cell]').forEach(button => button.addEventListener('click', () => {
+    hintCell = button.dataset.hintCell;
+    render();
+    app.querySelector(`[data-hint-cell="${hintCell}"]`)?.focus();
+  }));
 }
 
 function renderFeedbackPanel(snapshot) {
@@ -461,6 +574,8 @@ function renderLevelComplete(details) {
         <span>${details.context}</span>
         <h2 id="level-complete-title">${details.title}</h2>
         <p>${details.message}</p>
+        <p class="garden-growth">${details.growth || 'A new flower is growing in your garden.'}</p>
+        ${renderGardenScene(createSnapshot(state).gardenStats)}
         ${
           details.theme
             ? `<p class="level-complete__theme">${details.theme.completed} complete. ${details.theme.next} unlocked.</p>`
@@ -490,6 +605,7 @@ function bindEvents() {
   app.querySelectorAll('.letter').forEach((button) => {
     button.addEventListener('pointerdown', (event) => {
       event.preventDefault();
+      if (refreshDaily()) return;
       isSwiping = true;
       selectionChangedDuringSwipe = false;
       swipePointer = getWheelPoint(event.clientX, event.clientY);
@@ -522,11 +638,17 @@ function bindEvents() {
   });
 
   if (completion) {
+    const modal = app.querySelector('.level-complete');
+    [...app.children].forEach(child => { if (child !== modal) child.inert = true; });
+    modal.addEventListener('keydown', event => {
+      if (event.key === 'Tab') { event.preventDefault(); modal.querySelector('[data-action="continue"]').focus(); }
+    });
     window.setTimeout(() => app.querySelector('.level-complete [data-action="continue"]')?.focus(), 0);
   }
 }
 
 function selectLetter(index) {
+  if (refreshDaily()) return false;
   if (!Number.isInteger(index) || index < 0 || index >= wheelLetters.length) {
     return false;
   }
@@ -605,7 +727,8 @@ function fitBoard() {
   const boardPaddingX = parseFloat(boardStyles.paddingLeft) + parseFloat(boardStyles.paddingRight);
   const boardPaddingY = parseFloat(boardStyles.paddingTop) + parseFloat(boardStyles.paddingBottom);
   const availableWidth = wrap.clientWidth;
-  const availableHeight = wrap.clientHeight;
+  const wrapStyles = getComputedStyle(wrap);
+  const availableHeight = wrap.clientHeight - parseFloat(wrapStyles.paddingTop) - parseFloat(wrapStyles.paddingBottom);
 
   if (!cols || !rows || !availableWidth || !availableHeight || !baseTileSize || !Number.isFinite(tileGap)) {
     return;
@@ -621,6 +744,33 @@ function fitBoard() {
 }
 
 window.addEventListener('resize', fitBoard);
+
+// A daily board may stay open overnight. Refresh the wheel and board together.
+function refreshDaily(redraw = true) {
+  if (state.mode !== 'daily') { renderedDailyDate = null; return false; }
+  const dateKey = getProgress(state).dateKey;
+  if (dateKey === renderedDailyDate) return false;
+  renderedDailyDate = dateKey;
+  state = setMode(state, 'daily');
+  wheelLetters = getLevel(state).letters;
+  selection = [];
+  isSwiping = false;
+  selectionChangedDuringSwipe = false;
+  swipePointer = null;
+  completion = null;
+  feedback = null;
+  panel = null;
+  hintTarget = null;
+  hintCell = null;
+  message = 'A new daily garden is ready. Build words with today’s letters.';
+  saveState(state);
+  if (redraw) render();
+  return true;
+}
+window.addEventListener('focus', () => refreshDaily());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshDaily();
+});
 
 function updateSwipeGuide() {
   const guide = app.querySelector('[data-swipe-guide]');
@@ -691,6 +841,7 @@ function endSwipe() {
 }
 
 function handleAction(action) {
+  if (refreshDaily()) return;
   if (action === 'submit') {
     handleSubmit();
   }
@@ -716,35 +867,52 @@ function handleAction(action) {
     pulse('light');
     render();
   }
-  if (action === 'hint') {
-    completion = null;
-    const result = useHint(state);
-    state = result.state;
-    message = result.message;
-    feedback = createFeedback(result);
-    pulse(result.status);
-    saveState(state);
+  if (['hint', 'settings', 'garden', 'progress', 'board'].includes(action)) {
+    panel = action;
+    panelReturnFocus = action;
+    hintTarget = null;
+    hintCell = null;
     render();
   }
   if (action === 'reset') {
+    panel = 'confirm-reset';
+    render();
+  }
+  if (action === 'confirm-reset') {
     state = resetState();
     wheelLetters = getLevel(state).letters;
     selection = [];
     completion = null;
+    panel = null;
     feedback = { tone: 'reset', label: 'Fresh start' };
     message = 'Progress reset.';
-    pulse('light');
     render();
+    app.querySelector('[data-action="settings"]')?.focus();
+  }
+  if (action === 'close-panel') closeGamePanel();
+  if (action === 'buy-clue' || action === 'buy-reveal') {
+    const result = useHint(state, action === 'buy-clue'
+      ? { type: 'clue', targetIndex: hintTarget }
+      : { type: 'reveal', cellKey: hintCell });
+    state = result.state;
+    message = result.message;
+    feedback = createFeedback(result);
+    selection = [];
+    saveState(state);
+    pulse(result.status);
+    closeGamePanel();
   }
   if (action === 'continue') {
     completion = null;
     feedback = null;
     pulse('light');
     render();
+    app.querySelector('.letter')?.focus();
   }
 }
 
 function handleSubmit() {
+  if (refreshDaily()) return;
   const word = selection.map((item) => item.letter).join('');
   const previousLevel = state.levelIndex;
   const beforeSnapshot = createSnapshot(state);
@@ -815,8 +983,12 @@ function pulse(kind) {
 }
 
 function createCompletionDetails(beforeSnapshot, afterSnapshot, resultMessage) {
+  const before = beforeSnapshot.gardenStats;
+  const after = afterSnapshot.gardenStats;
+  const growth = after?.completedPacks > before?.completedPacks ? 'A garden area is complete! Your garden has a new look.' : after?.butterflies > before?.butterflies ? 'A new flower bloomed and a butterfly arrived!' : after?.trees > before?.trees ? 'A new flower bloomed and a tree took root!' : 'A new flower bloomed in your garden!';
   if (state.mode === 'daily') {
     return {
+      growth,
       context: beforeSnapshot.level.title,
       title: 'Daily complete',
       message: resultMessage,
@@ -827,6 +999,7 @@ function createCompletionDetails(beforeSnapshot, afterSnapshot, resultMessage) {
   }
 
   return {
+    growth,
     context: beforeSnapshot.campaignStats.pack.title,
     title: `Level ${beforeSnapshot.campaignStats.currentLevel} complete`,
     message: resultMessage,

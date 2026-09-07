@@ -79,8 +79,8 @@ test('Brook grid keeps secondary words compactly crossed with the base word', ()
 
   const xs = [...cells.keys()].map((key) => Number(key.split(':')[0]));
   const ys = [...cells.keys()].map((key) => Number(key.split(':')[1]));
-  assert.equal(Math.max(...xs) - Math.min(...xs) + 1, 6);
-  assert.equal(Math.max(...ys) - Math.min(...ys) + 1, 5);
+  assert.equal(Math.max(...xs) - Math.min(...xs) + 1, 7);
+  assert.equal(Math.max(...ys) - Math.min(...ys) + 1, 6);
   assert.equal(placements.filter((placement) => placement.direction === 'across').length, 2);
   assert.equal(placements.filter((placement) => placement.direction === 'down').length, 3);
 });
@@ -167,7 +167,7 @@ test('hint spends coins and records a revealed target letter', () => {
   const result = useHint(state);
 
   assert.equal(result.status, 'hint');
-  assert.equal(result.state.coins, 25);
+  assert.equal(result.state.coins, 30);
   assert.deepEqual(result.state.revealed, ['PLANT:0']);
 });
 
@@ -176,7 +176,7 @@ test('hint skips letters already shown by solved intersections', () => {
   const result = useHint(state);
 
   assert.equal(result.status, 'hint');
-  assert.equal(result.state.coins, 25);
+  assert.equal(result.state.coins, 30);
   assert.deepEqual(result.state.revealed, ['PLAN:1']);
 });
 

@@ -1102,3 +1102,59 @@ h1 {
     padding-block: 5px;
   }
 }
+
+/* Keep progress and the living garden compact so the puzzle gets the space. */
+.shell { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto auto; }
+h1 { font-size: clamp(1.45rem, 4.5vw, 2rem); line-height: 1.05; }
+.topbar { align-items: center; }
+.eyebrow { margin-bottom: 2px; }
+.compact-progress { display: flex; gap: 9px; align-items: center; padding: 7px 10px; min-height: 32px; border-radius: 12px; font-size: .72rem; }
+.compact-progress .campaign-meter { flex: 1; min-width: 30px; height: 6px; }
+.garden-peek { display: flex; align-items: center; justify-content: space-between; gap: 12px; overflow: hidden; border-radius: 12px; text-align: left; min-height: 38px; padding: 0 10px 0 0; background: #edf2df; }
+.garden-peek .garden-scene { width: 44%; height: 38px; border-radius: 0; object-fit: cover; }
+.garden-peek > span { flex: 1; }
+.garden-peek strong, .garden-peek small { display: block; }
+.garden-peek strong { font-size: .74rem; }
+.garden-peek small { font-size: .65rem; margin-top: 3px; }
+.garden-scene { display: block; width: 100%; border-radius: 12px; }
+.garden-growth { color: #2f7a54; }
+.board-wrap { padding-top: 23px; }
+.tile { position: relative; border-radius: 8px; font-size: min(1.3rem, calc(var(--fit-tile-size, 40px) * .56)); }
+.slot-number { position: absolute; top: 1px; left: 2px; font-size: min(9px, calc(var(--fit-tile-size, 40px) * .24)); line-height: 1; color: #60745c; }
+:root { --tile-size: 46px; --tile-gap: 4px; }
+.game-panel { position: fixed; width: min(440px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); margin: auto; padding: 22px; border: 1px solid #fffaf0; border-radius: 22px; background: #f4f6e9; color: #18342c; box-shadow: 0 24px 64px #08201b66; }
+.game-panel::backdrop { background: #09261db3; backdrop-filter: blur(5px); }
+.game-panel h2 { margin: 0 70px 18px 0; font-family: 'Fraunces', serif; font-size: 1.4rem; }
+.panel-close { position: absolute; top: 15px; right: 14px; padding: 10px 14px; }
+.game-panel__content { display: grid; gap: 12px; }
+.game-panel__content p { margin: 0; }
+.game-panel__content button, .game-panel__content select { min-height: 44px; }
+.game-panel__content select { width: 100%; min-width: 0; border-radius: 8px; border: 1px solid #64806a; padding: 9px; background: #fffdf4; font: inherit; color: inherit; }
+.game-panel__content hr { width: 100%; border: 0; border-top: 1px solid #bacab8; }
+.panel-note { font-size: .82rem; color: #49644e; }
+.game-panel .campaign-strip { padding: 12px; }
+.game-panel .campaign-pack { display: flex; }
+.game-panel .campaign-journey div { min-height: 48px; }
+.game-panel .campaign-strip span { font-size: .72rem; }
+button:disabled { opacity: .48; cursor: default; }
+button:focus-visible, select:focus-visible { outline: 3px solid #2f7a54; outline-offset: 3px; }
+.danger { background: #a13f36; color: white; }
+.hint-board { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 3px; width: 100%; }
+.game-panel__content .hint-tile { min-height: 0; width: 100%; aspect-ratio: 1; padding: 0; border-radius: 5px; box-shadow: none; border: 1px solid #9eb28f; background: #fffdf4; }
+.hint-tile.is-selected { background: #f5c451; outline: 3px solid #2f7a54; z-index: 1; }
+@media (max-height: 700px) {
+  .garden-peek, .garden-peek .garden-scene { min-height: 30px; height: 30px; }
+  .garden-peek strong { font-size: .68rem; }
+  .garden-peek small { font-size: .6rem; }
+  .compact-progress { min-height: 28px; padding-block: 5px; }
+  .eyebrow { font-size: .58rem; }
+  .topbar h1 { font-size: 1.4rem; }
+}
+
+.level-card { width: 100%; }
+.enlarge-board { margin-left: auto; flex-shrink: 0; min-height: 24px; padding: 4px 9px; font-size: .67rem; box-shadow: none; background: #edf2df; border: 1px solid #6e8c65; }
+.expanded-board-scroll { max-width: 100%; max-height: 60dvh; overflow: auto; padding: 4px; border: 1px solid #a7ba98; border-radius: 8px; overscroll-behavior: contain; }
+.expanded-board-scroll:focus-visible { outline: 3px solid #2f7a54; outline-offset: 2px; }
+.expanded-board { display: grid; grid-template-columns: repeat(var(--cols), 36px); grid-template-rows: repeat(var(--rows), 36px); gap: 4px; width: max-content; padding: 4px 4px 10px; }
+.expanded-board .tile { width: 36px; height: 36px; font-size: 19px; }
+.expanded-board .slot-number { font-size: 8px; }
