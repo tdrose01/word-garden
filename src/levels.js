@@ -1,4 +1,4 @@
-export const levels = [
+export const legacyLevels = [
   {
     id: 1,
     title: 'Meadow',
@@ -289,7 +289,7 @@ export const levels = [
   }
 ];
 
-export const dailyLevels = [
+export const legacyDailyLevels = [
   {
     id: 'daily-fern',
     title: 'Daily Fern',
@@ -327,15 +327,26 @@ export const dailyLevels = [
   }
 ];
 
-export function getDailyLevel(date = new Date()) {
-  const key = getDateKey(date);
-  const seed = Array.from(key).reduce((total, char) => total + char.charCodeAt(0), 0);
+// Keep the original boards available solely to finish saves made before version 2.
+export const LEVEL_VERSION = 2;
+export const levels = legacyLevels.map((level, index) => {
+  const extraCount = index < 12 ? 0 : index < 24 ? 1 : 2;
+  const extra = [...level.bonus].sort((a, b) => b.length - a.length).slice(0, extraCount);
+  return { ...level, targets: [...level.targets, ...extra], bonus: level.bonus.filter(word => !extra.includes(word)) };
+});
 
-  return {
-    ...dailyLevels[seed % dailyLevels.length],
-    id: key,
-    title: `Daily ${key.slice(5)}`
-  };
+// Forty-one distinct boards; consecutive UTC days traverse the entire pool.
+export const dailyLevels = [...legacyDailyLevels, ...levels.map(level => ({
+  ...level, id: `daily-${level.id}`, title: `Daily ${level.title}`
+}))];
+
+export function getDailyLevel(date = new Date(), version = LEVEL_VERSION) {
+  const key = getDateKey(date);
+  const pool = version === 1 ? legacyDailyLevels : dailyLevels;
+  const seed = version === 1
+    ? Array.from(key).reduce((total, char) => total + char.charCodeAt(0), 0)
+    : Math.floor(Date.parse(`${key}T00:00:00.000Z`) / 86400000);
+  return { ...pool[((seed % pool.length) + pool.length) % pool.length], id: key, title: `Daily ${key.slice(5)}` };
 }
 
 export function getDateKey(date = new Date()) {
@@ -448,16 +459,19 @@ function getPlacementBounds(placements) {
 }
 
 function canPlace(placement, occupied) {
+  const dx = placement.direction === 'across' ? 1 : 0;
+  const dy = placement.direction === 'down' ? 1 : 0;
+  if (occupied.has(cellKey(placement.x - dx, placement.y - dy)) ||
+      occupied.has(cellKey(placement.x + dx * placement.word.length, placement.y + dy * placement.word.length))) return false;
   let hasNewCell = false;
-  const hasOnlyCompatibleCells = Array.from(placement.word).every((letter, index) => {
-    const x = placement.x + (placement.direction === 'across' ? index : 0);
-    const y = placement.y + (placement.direction === 'down' ? index : 0);
+  return Array.from(placement.word).every((letter, index) => {
+    const x = placement.x + dx * index;
+    const y = placement.y + dy * index;
     const current = occupied.get(cellKey(x, y));
-    hasNewCell = hasNewCell || current === undefined;
-    return current === undefined || current === letter;
-  });
-
-  return hasOnlyCompatibleCells && hasNewCell;
+    if (current !== undefined) return current === letter;
+    hasNewCell = true;
+    return !occupied.has(cellKey(x + dy, y + dx)) && !occupied.has(cellKey(x - dy, y - dx));
+  }) && hasNewCell;
 }
 
 function findNextRowBelow(placements) {

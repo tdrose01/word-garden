@@ -129,3 +129,12 @@ Casual mobile puzzle players who want short, relaxing sessions. They understand 
 - Raw dictionaries produce obscure junk words. Use curated lists for MVP and frequency-filtered dictionaries later.
 - Crossword generation can become a rabbit hole. Ship curated levels first, then generator.
 - The category is crowded. Differentiate through cleaner monetization, tasteful design, and smoother feel.
+
+## Garden growth update
+
+- Broaden the curated bonus vocabulary; recognize common buildable extras such as SENT on STONE, reward each once, and keep target answers curated.
+- Show a persistent garden that grows with campaign and daily completions. Flowers, trees, and butterflies mark milestones; completing the same daily again must not grow the garden or award coins again.
+- Use a compact header and expandable progress details so the phone layout gives more room to the crossword. Keep reset in settings behind a clear confirmation with a safe cancel action.
+- Introduce varied campaign target counts and a larger deterministic daily rotation. Preserve active puzzles and earned progress during upgrades.
+- Offer a targeted letter reveal for 10 coins, a cheaper clue for 5, and a limited rescue when the player cannot afford help. Display costs and target choices before spending, never charge for unavailable or already visible hints.
+- Validate touch and keyboard controls, small-screen layout, saved-state upgrades, reward idempotency, and feedback behavior before release.

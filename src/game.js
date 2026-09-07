@@ -1,5 +1,5 @@
 import { isDictionaryWord } from './dictionary.js';
-import { buildGrid, getDailyLevel, getDateKey, levels } from './levels.js';
+import { buildGrid, getDailyLevel, getDateKey, levels, legacyLevels, LEVEL_VERSION } from './levels.js';
 import { canBuildWord, normalizeWord } from './word-utils.js';
 
 export { canBuildWord };
@@ -33,10 +33,10 @@ export function resetState(storage = window.localStorage, random = Math.random) 
 export function getLevel(state) {
   if (state.mode === 'daily') {
     const progress = getDailyProgress(state);
-    return getDailyLevel(new Date(`${progress.dateKey}T00:00:00.000Z`));
+    return getDailyLevel(new Date(`${progress.dateKey}T00:00:00.000Z`), progress.levelVersion);
   }
 
-  return levels[getCampaignPuzzleIndex(state)];
+  return state.campaignLevelVersion === 1 ? legacyLevels[getCampaignPuzzleIndex(state)] : levels[getCampaignPuzzleIndex(state)];
 }
 
 export function getProgress(state) {
@@ -58,6 +58,8 @@ export function createSnapshot(state) {
     progress,
     campaignStats: createCampaignStats(state),
     dailyStats: getDailyStatsView(state),
+    gardenStats: createGardenStats(state),
+    hintOptions: createHintOptions(state, placements, progress),
     cells: buildCells(placements, progress)
   };
 }
@@ -112,47 +114,61 @@ export function submitWord(input, state) {
   return { state, status: 'invalid', message: 'Not in this puzzle.' };
 }
 
-export function useHint(state) {
-  if (state.coins < 15) {
-    return { state, status: 'blocked', message: 'Need 15 coins for a hint.' };
-  }
-
+export function useHint(state, options = {}) {
   const level = getLevel(state);
   const progress = getProgress(state);
   const placements = buildGrid(level.targets);
-  const visibleCells = new Set(
-    buildCells(placements, progress)
-      .filter((cell) => cell.letter)
-      .map((cell) => `${cell.x}:${cell.y}`)
-  );
-  const unsolvedTargets = level.targets.filter((word) => !progress.solved.includes(word));
-  if (unsolvedTargets.length === 0) {
-    return { state, status: 'blocked', message: 'No hints needed.' };
-  }
+  const hints = createHintOptions(state, placements, progress);
+  const clue = options.type === 'clue' || options.kind === 'clue';
+  const targetIndex = options.targetIndex ?? level.targets.indexOf(options.target);
+  if (clue && (options.targetIndex !== undefined || options.target !== undefined) && (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= level.targets.length)) return { state, status: 'blocked', message: 'Choose a word on this board.' };
+  const candidates = placements.flatMap((placement, slot) => {
+    if (progress.solved.includes(placement.word) || (clue && targetIndex >= 0 && slot !== targetIndex)) return [];
+    return Array.from(placement.word).map((_, index) => ({
+      revealKey: `${placement.word}:${index}`, cellKey: getPlacementCellKey(placement, index)
+    })).filter(cell => hints.cells.includes(cell.cellKey));
+  });
+  const chosen = options.cellKey ? candidates.find(cell => cell.cellKey === options.cellKey) : candidates[0];
+  if (!chosen) return { state, status: 'blocked', message: 'No hidden letters there. Choose another word or cell.' };
+  const price = clue ? 5 : 10;
+  const free = hints.freeRescueAvailable;
+  if (!free && state.coins < price) return { state, status: 'blocked', message: `Need ${price} coins. Try a 5-coin clue or find a bonus word.` };
+  return {
+    state: updateProgress({ ...state, coins: state.coins - (free ? 0 : price) }, {
+      ...progress, revealed: [...progress.revealed, chosen.revealKey], rescueUsed: progress.rescueUsed || free
+    }),
+    status: 'hint', message: free ? 'Free rescue: one letter revealed.' : clue ? 'Word clue: next hidden letter revealed.' : 'Selected letter revealed.'
+  };
+}
 
-  for (const target of unsolvedTargets) {
-    const placement = placements.find((candidate) => candidate.word === target);
-    if (!placement) {
-      continue;
-    }
+function createHintOptions(state, placements, progress) {
+  const cells = buildCells(placements, progress).filter(cell => !cell.letter).map(cell => `${cell.x}:${cell.y}`);
+  const visible = new Map(buildCells(placements, progress).map(cell => [`${cell.x}:${cell.y}`, cell.letter]));
+  return {
+    clueCost: 5, revealCost: 10,
+    freeRescueAvailable: state.coins < 5 && !progress.rescueUsed && cells.length > 0,
+    cells,
+    words: placements.map((placement, targetIndex) => ({
+      targetIndex, slot: targetIndex + 1, label: `Word ${targetIndex + 1} · ${placement.word.length} letters`,
+      length: placement.word.length, direction: placement.direction, row: placement.y + 1, col: placement.x + 1,
+      pattern: Array.from(placement.word).map((_, index) => visible.get(getPlacementCellKey(placement, index)) || '·').join(''),
+      available: !progress.solved.includes(placement.word) && Array.from(placement.word).some((_, index) => cells.includes(getPlacementCellKey(placement, index)))
+    }))
+  };
+}
 
-    for (let index = 0; index < target.length; index += 1) {
-      const key = `${target}:${index}`;
-      const cellKey = getPlacementCellKey(placement, index);
-      if (!visibleCells.has(cellKey)) {
-        return {
-          state: updateProgress(
-            { ...state, coins: state.coins - 15 },
-            { ...progress, revealed: [...progress.revealed, key] }
-          ),
-          status: 'hint',
-          message: 'One letter revealed.'
-        };
-      }
-    }
-  }
-
-  return { state, status: 'blocked', message: 'Try another word.' };
+function createGardenStats(state) {
+  const campaign = getCampaignProgress(state);
+  const dailyCompletions = getDailyStats(state).totalCompletions;
+  const totalCompletions = campaign.completedLevels + dailyCompletions;
+  const packEnds = levels.flatMap((level, index) => levels[index + 1]?.pack !== level.pack ? [index + 1] : []);
+  const completedPacks = Math.floor(campaign.completedLevels / levels.length) * packEnds.length + packEnds.filter(end => end <= campaign.completedLevels % levels.length).length;
+  const nextAt = (Math.floor(totalCompletions / 5) + 1) * 5;
+  return {
+    flowers: totalCompletions, trees: Math.floor(totalCompletions / 5), butterflies: Math.floor(totalCompletions / 10),
+    totalCompletions, dailyCompletions, completedPacks,
+    nextUnlock: { label: nextAt % 10 === 0 ? 'Butterfly and tree' : 'Tree', remaining: nextAt - totalCompletions, at: nextAt }
+  };
 }
 
 export function shuffleLetters(letters) {
@@ -228,6 +244,8 @@ function advanceLevel(state) {
     bonusFound: [],
     revealed: [],
     campaign,
+    campaignLevelVersion: LEVEL_VERSION,
+    rescueUsed: false,
     daily: getDailyProgress(state),
     dailyStats: getDailyStats(state)
   };
@@ -240,6 +258,8 @@ function normalizeState(state, random) {
     ...state,
     mode: state.mode === 'daily' ? 'daily' : 'campaign',
     levelIndex: campaign.completedLevels,
+    campaignLevelVersion: state.campaignLevelVersion || 1,
+    rescueUsed: Boolean(state.rescueUsed),
     solved: Array.isArray(state.solved) ? state.solved : [],
     bonusFound: Array.isArray(state.bonusFound) ? state.bonusFound : [],
     revealed: Array.isArray(state.revealed) ? state.revealed : [],
@@ -253,6 +273,8 @@ function createInitialState(random = Math.random) {
   return {
     mode: 'campaign',
     levelIndex: 0,
+    campaignLevelVersion: LEVEL_VERSION,
+    rescueUsed: false,
     coins: 40,
     solved: [],
     bonusFound: [],
@@ -382,6 +404,8 @@ function completeCampaignProgress(campaign, completedLevelNumber) {
 function createDailyProgress(date = new Date()) {
   return {
     dateKey: getDateKey(date),
+    levelVersion: LEVEL_VERSION,
+    rescueUsed: false,
     solved: [],
     bonusFound: [],
     revealed: [],
@@ -397,6 +421,8 @@ function getDailyProgress(state) {
 
   return {
     dateKey: today,
+    levelVersion: state.daily.levelVersion || 1,
+    rescueUsed: Boolean(state.daily.rescueUsed),
     solved: Array.isArray(state.daily.solved) ? state.daily.solved : [],
     bonusFound: Array.isArray(state.daily.bonusFound) ? state.daily.bonusFound : [],
     revealed: Array.isArray(state.daily.revealed) ? state.daily.revealed : [],
@@ -407,6 +433,7 @@ function getDailyProgress(state) {
 function createDailyStats() {
   return {
     streak: 0,
+    totalCompletions: 0,
     bestStreak: 0,
     lastCompletedDate: '',
     reward: 10
@@ -416,6 +443,7 @@ function createDailyStats() {
 function getDailyStats(state) {
   const stats = state.dailyStats || {};
   return {
+    totalCompletions: Number.isFinite(stats.totalCompletions) ? Math.max(0, Math.floor(stats.totalCompletions)) : Math.max(stats.bestStreak || 0, stats.streak || 0, stats.lastCompletedDate || state.daily?.completed ? 1 : 0),
     streak: Number.isFinite(stats.streak) ? stats.streak : 0,
     bestStreak: Number.isFinite(stats.bestStreak) ? stats.bestStreak : 0,
     lastCompletedDate: typeof stats.lastCompletedDate === 'string' ? stats.lastCompletedDate : '',
@@ -440,6 +468,7 @@ function getDailyStatsView(state) {
 function completeDailyStats(stats, dateKey) {
   if (stats.lastCompletedDate === dateKey) {
     return {
+      totalCompletions: stats.totalCompletions,
       streak: stats.streak,
       bestStreak: stats.bestStreak,
       lastCompletedDate: stats.lastCompletedDate,
@@ -450,6 +479,7 @@ function completeDailyStats(stats, dateKey) {
   const streak = getDailyStreak(stats, dateKey);
 
   return {
+    totalCompletions: stats.totalCompletions + 1,
     streak,
     bestStreak: Math.max(stats.bestStreak, streak),
     lastCompletedDate: dateKey,
@@ -497,7 +527,8 @@ function updateProgress(state, progress) {
     ...state,
     solved: progress.solved,
     bonusFound: progress.bonusFound,
-    revealed: progress.revealed
+    revealed: progress.revealed,
+    rescueUsed: Boolean(progress.rescueUsed)
   };
 }
 

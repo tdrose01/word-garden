@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { levels } from '../src/levels.js';
+import { levels, getDailyLevel } from '../src/levels.js';
 import { resolveSmokeBrowser, resolveSmokeTarget } from './smoke-target.js';
 
 const ROOT = new URL('..', import.meta.url);
@@ -260,6 +260,7 @@ async function freshPage(browser, contextOptions = {}, stateOverrides = {}) {
       'word-garden-state',
       JSON.stringify({
         mode: 'campaign',
+        campaignLevelVersion: 2,
         levelIndex: 0,
         coins: 40,
         solved: [],
@@ -325,11 +326,13 @@ async function letterCenters(page) {
 }
 
 function spellPath(letters, word) {
+  const used = new Set();
   return Array.from(word).map((char) => {
-    const point = letters.find((letter) => letter.text === char);
+    const point = letters.find((letter) => letter.text === char && !used.has(letter.index));
     if (!point) {
       throw new Error(`Missing letter ${char}`);
     }
+    used.add(point.index);
     return point;
   });
 }
@@ -384,7 +387,7 @@ async function expectCurrentWord(page, expected) {
 }
 
 async function expectBoardContainsWord(page, word) {
-  const letters = await page.$$eval('.tile', (tiles) => tiles.map((tile) => tile.textContent.trim()).join(''));
+  const letters = await page.$$eval('.tile', (tiles) => tiles.map((tile) => [...tile.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim()).join(''));
   if (!letters.includes(word)) {
     throw new Error(`Expected board to show ${word}, got ${letters}`);
   }
@@ -398,8 +401,8 @@ async function expectLevelTwo(page) {
     throw new Error(`Expected level card to show Brook, got ${levelTitle}`);
   }
 
-  const campaignLevel = await page.locator('.campaign-strip__meta strong').textContent();
-  if (campaignLevel !== `Level 2/${levels.length}`) {
+  const campaignLevel = await page.locator('.compact-progress > span').first().textContent();
+  if (!campaignLevel.endsWith(`2/${levels.length}`)) {
     throw new Error(`Expected campaign topbar to show Level 2/${levels.length}, got ${campaignLevel}`);
   }
 
@@ -414,8 +417,8 @@ async function expectLevelThree(page) {
     throw new Error(`Expected level card to show Orchard, got ${levelTitle}`);
   }
 
-  const campaignLevel = await page.locator('.campaign-strip__meta strong').textContent();
-  if (campaignLevel !== `Level 3/${levels.length}`) {
+  const campaignLevel = await page.locator('.compact-progress > span').first().textContent();
+  if (!campaignLevel.endsWith(`3/${levels.length}`)) {
     throw new Error(`Expected campaign topbar to show Level 3/${levels.length}, got ${campaignLevel}`);
   }
 
@@ -520,15 +523,15 @@ async function expectNoActiveLetters(page) {
 }
 
 async function expectCampaignProgressDisplay(page, expected, expectedEyebrow = 'Level 1') {
-  await page.waitForSelector('.campaign-strip');
+  await page.waitForSelector('.compact-progress');
 
   const eyebrow = await page.locator('.eyebrow').textContent();
   if (expectedEyebrow && eyebrow !== expectedEyebrow) {
     throw new Error(`Expected campaign eyebrow ${expectedEyebrow}, got ${eyebrow}`);
   }
 
-  const campaignLevel = await page.locator('.campaign-strip__meta strong').textContent();
-  if (expectedEyebrow && campaignLevel !== `${expectedEyebrow}/${levels.length}`) {
+  const campaignLevel = await page.locator('.compact-progress > span').first().textContent();
+  if (expectedEyebrow && !campaignLevel.endsWith(`${expectedEyebrow.replace('Level ', '')}/${levels.length}`)) {
     throw new Error(`Expected campaign topbar Level 1/${levels.length}, got ${campaignLevel}`);
   }
 
@@ -536,7 +539,7 @@ async function expectCampaignProgressDisplay(page, expected, expectedEyebrow = '
 }
 
 async function expectCampaignJourney(page, expectedCleared) {
-  const cleared = await page.locator('.campaign-journey div').first().locator('strong').textContent();
+  const cleared = String(await page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')).campaign.completedLevels));
   if (cleared !== String(expectedCleared)) {
     throw new Error(`Expected journey cleared ${expectedCleared}, got ${cleared}`);
   }
@@ -544,7 +547,7 @@ async function expectCampaignJourney(page, expectedCleared) {
 
 async function expectViewportFit(page, label) {
   const result = await page.evaluate(() => {
-    const sections = ['.topbar', '.mode-tabs', '.campaign-strip, .daily-strip', '.board-wrap', '.composer', '.tools', '.ledger'];
+    const sections = ['.topbar', '.mode-tabs', '.compact-progress', '.garden-peek', '.board-wrap', '.composer', '.tools', '.ledger'];
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const overflowing = [];
@@ -634,7 +637,7 @@ async function expectBoardFullyVisible(page, label) {
 }
 
 async function expectDailyProgressDisplay(page) {
-  await page.waitForSelector('.daily-strip');
+  await page.waitForSelector('.compact-progress');
 
   const eyebrow = await page.locator('.eyebrow').textContent();
   if (eyebrow !== 'Daily') {
@@ -668,9 +671,14 @@ async function verifyVisibleControls(page) {
   await expectCurrentWord(page, 'TAP OR SWIPE LETTERS');
   await expectNoActiveLetters(page);
 
+  await tapWithMouse(page, 'PLA');
   const revealedBefore = await page.locator('.tile.is-revealed').count();
   await page.locator('[data-action="hint"]').click();
-  await expectCoins(page, 25);
+  await page.locator('[data-hint-cell]:not([disabled])').first().click();
+  await page.locator('[data-action="buy-reveal"]').click();
+  await expectCoins(page, 30);
+  await expectCurrentWord(page, 'TAP OR SWIPE LETTERS');
+  await expectNoActiveLetters(page);
   const revealedAfter = await page.locator('.tile.is-revealed').count();
   if (revealedAfter <= revealedBefore) {
     throw new Error(`Expected hint to reveal a tile, count stayed at ${revealedAfter}`);
@@ -684,7 +692,15 @@ async function verifyVisibleControls(page) {
   await page.locator('[data-mode="campaign"]').click();
   await expectCampaignProgressDisplay(page, '1/5');
 
+  await page.locator('[data-action="settings"]').click();
   await page.locator('[data-action="reset"]').click();
+  if (await page.evaluate(() => document.activeElement?.textContent) !== 'Cancel') throw new Error('Reset must focus Cancel');
+  await page.locator('[data-action="close-panel"]').click();
+  await expectCampaignProgressDisplay(page, '1/5');
+  await expectCoins(page, 30);
+  await page.locator('[data-action="settings"]').click();
+  await page.locator('[data-action="reset"]').click();
+  await page.locator('[data-action="confirm-reset"]').click();
   await expectCampaignProgressDisplay(page, '0/5', null);
   await expectCoins(page, 40);
 }
@@ -697,6 +713,7 @@ try {
   try {
     const desktop = await freshPage(browser, { viewport: { width: 900, height: 900 } });
     await expectViewportFit(desktop.page, 'desktop campaign');
+    if (!await desktop.page.locator('.slot-number').allTextContents().then(labels => labels.includes('1/2'))) throw new Error('Shared starts must label both words');
     await dragWithMouse(desktop.page, 'PLANT');
     await expectViewportFit(desktop.page, 'desktop campaign after word');
     await expectProgress(desktop.page, '1/5');
@@ -758,6 +775,18 @@ try {
     );
     await expectViewportFit(largeRandomStart.page, 'small mobile 8x8 campaign');
     await expectBoardFullyVisible(largeRandomStart.page, 'small mobile 8x8 campaign');
+    await largeRandomStart.page.locator('[data-action="board"]').click();
+    const expanded = await largeRandomStart.page.locator('.expanded-board .tile').evaluateAll(tiles => tiles.map(tile => tile.getBoundingClientRect().width));
+    if (!expanded.length || expanded.some(size => size < 28)) throw new Error('Enlarged board tiles must remain readable');
+    const lastExpandedTile = largeRandomStart.page.locator('.expanded-board .tile').last();
+    await lastExpandedTile.scrollIntoViewIfNeeded();
+    const accessible = await lastExpandedTile.evaluate(tile => {
+      const box = tile.getBoundingClientRect();
+      return box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight;
+    });
+    if (!accessible) throw new Error('Enlarged board end must be reachable by scrolling');
+    await largeRandomStart.page.keyboard.press('Escape');
+    if (await largeRandomStart.page.locator('[data-action="board"]').evaluate(el => el !== document.activeElement)) throw new Error('Expanded board must restore focus');
     await largeRandomStart.context.close();
 
     const tap = await freshPage(browser, { viewport: { width: 390, height: 844 }, isMobile: true });
@@ -775,6 +804,39 @@ try {
     await verifyVisibleControls(controls.page);
     await controls.context.close();
 
+    const affordableHints = await freshPage(browser, { viewport: { width: 360, height: 640 }, isMobile: true }, { coins: 5 });
+    await affordableHints.page.locator('[data-action="hint"]').click();
+    await affordableHints.page.locator('#hint-word').selectOption('0');
+    await affordableHints.page.locator('[data-action="buy-clue"]').click();
+    await expectCoins(affordableHints.page, 0);
+    if (await affordableHints.page.locator('.tile.is-revealed').count() !== 1) throw new Error('Clue must reveal one letter');
+    await affordableHints.page.locator('[data-action="hint"]').click();
+    await affordableHints.page.locator('#hint-word').selectOption('0');
+    await affordableHints.page.locator('[data-action="buy-clue"]').click();
+    await expectCoins(affordableHints.page, 0);
+    if (await affordableHints.page.locator('.tile.is-revealed').count() !== 2) throw new Error('Free rescue must reveal one more letter');
+    await affordableHints.page.reload();
+    await affordableHints.page.locator('[data-action="hint"]').click();
+    await affordableHints.page.locator('#hint-word').selectOption('0');
+    if (await affordableHints.page.locator('[data-action="buy-clue"]').isEnabled()) throw new Error('Reload must not replenish rescue');
+    await affordableHints.page.keyboard.press('Escape');
+    if (await affordableHints.page.locator('[data-action="hint"]').evaluate(el => el !== document.activeElement)) throw new Error('Escape must restore hint focus');
+    await affordableHints.context.close();
+
+    const midnight = await freshPage(browser, { viewport: { width: 390, height: 844 }, isMobile: true });
+    await midnight.page.clock.setFixedTime(new Date('2026-09-07T23:59:59Z'));
+    await midnight.page.locator('[data-mode="daily"]').click();
+    const tomorrow = getDailyLevel(new Date('2026-09-08T00:00:01Z'));
+    const firstLetter = midnight.page.locator('.letter').first();
+    await firstLetter.click();
+    await midnight.page.clock.setFixedTime(new Date('2026-09-08T00:00:01Z'));
+    await midnight.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    if (sortedLetters(await wheelLetters(midnight.page)) !== sortedLetters(tomorrow.letters)) throw new Error('Daily rollover must update letter wheel');
+    await expectCurrentWord(midnight.page, 'TAP OR SWIPE LETTERS');
+    await submitByTap(midnight.page, tomorrow.targets[0]);
+    await expectProgress(midnight.page, `1/${tomorrow.targets.length}`);
+    await midnight.context.close();
+
     const completion = await freshPage(browser, { viewport: { width: 900, height: 900 } });
     for (let index = 0; index < levelOneTargets.length; index += 1) {
       await dragWithMouse(completion.page, levelOneTargets[index]);
@@ -787,6 +849,17 @@ try {
     await expectLevelCompleteOverlay(completion.page, 'Level 1 complete', 'Level 1 complete! +10 coins. Next: Level 2.');
     await expectCampaignJourney(completion.page, 1);
     await completion.page.locator('.level-complete [data-action="continue"]').click();
+    await submitByTap(completion.page, 'SENT');
+    await expectCoins(completion.page, 52);
+    await submitByTap(completion.page, 'SENT');
+    await expectCoins(completion.page, 52);
+    await expectProgress(completion.page, '0/5');
+    const growthBeforeReload = await completion.page.locator('[data-garden-growth]').getAttribute('data-garden-growth');
+    if (Number(growthBeforeReload) !== 1) throw new Error('First completion must grow garden exactly once');
+    await completion.page.reload();
+    const growthAfterReload = await completion.page.locator('[data-garden-growth]').getAttribute('data-garden-growth');
+    if (growthAfterReload !== growthBeforeReload) throw new Error('Garden growth must survive reload');
+    await expectCoins(completion.page, 52);
     for (let index = 0; index < levelTwoTargets.length; index += 1) {
       await submitByTap(completion.page, levelTwoTargets[index]);
       if (index < levelTwoTargets.length - 1) {
