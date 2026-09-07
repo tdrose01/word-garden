@@ -138,3 +138,11 @@ Casual mobile puzzle players who want short, relaxing sessions. They understand 
 - Introduce varied campaign target counts and a larger deterministic daily rotation. Preserve active puzzles and earned progress during upgrades.
 - Offer a targeted letter reveal for 10 coins, a cheaper clue for 5, and a limited rescue when the player cannot afford help. Display costs and target choices before spending, never charge for unavailable or already visible hints.
 - Validate touch and keyboard controls, small-screen layout, saved-state upgrades, reward idempotency, and feedback behavior before release.
+
+## Issue 11: default board readability
+The normal board keeps cells at least 32px with 18px letter text and 9px slot labels. Large grids scroll within a keyboard-focusable region while the letter wheel and controls stay accessible. Scroll cues and retained position replace shrinking letters until the entire board fits. Wheel touch targets are at least 44px. Browser validation checks readable sizes and actual reachability of every tile, including late-game grids on compact phones.
+
+## Issue 12: word-associated scenery
+Each seed word selects associated scenery and a quiet palette. Labels describe the scene without spelling an unsolved answer. Puzzle answers, saved state, and rewards are unchanged; themes follow the actual puzzle in campaign and daily modes.
+
+Wheel diameter grows with the number of letters so touch targets do not overlap. The grid retains at least a 96px viewing area; when a long wheel or wrapped feedback needs more room, the page grows and scrolls so every control remains reachable. Layouts with enough room retain their fixed viewport. Guidance text uses opaque high-contrast backing across all scenery.

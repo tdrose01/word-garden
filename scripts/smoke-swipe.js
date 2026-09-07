@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { levels, getDailyLevel } from '../src/levels.js';
+import { getLevelTheme } from '../src/themes.js';
 import { resolveSmokeBrowser, resolveSmokeTarget } from './smoke-target.js';
 
 const ROOT = new URL('..', import.meta.url);
@@ -396,7 +397,7 @@ async function expectBoardContainsWord(page, word) {
 async function expectLevelTwo(page) {
   await page.waitForFunction(() => document.querySelector('.eyebrow')?.textContent?.trim() === 'Level 2');
 
-  const levelTitle = await page.locator('.level-card p').textContent();
+  const levelTitle = await page.locator('.level-card p').evaluate(el => [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
   if (levelTitle !== 'Brook') {
     throw new Error(`Expected level card to show Brook, got ${levelTitle}`);
   }
@@ -412,7 +413,7 @@ async function expectLevelTwo(page) {
 async function expectLevelThree(page) {
   await page.waitForFunction(() => document.querySelector('.eyebrow')?.textContent?.trim() === 'Level 3');
 
-  const levelTitle = await page.locator('.level-card p').textContent();
+  const levelTitle = await page.locator('.level-card p').evaluate(el => [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
   if (levelTitle !== 'Orchard') {
     throw new Error(`Expected level card to show Orchard, got ${levelTitle}`);
   }
@@ -546,11 +547,27 @@ async function expectCampaignJourney(page, expectedCleared) {
 }
 
 async function expectViewportFit(page, label) {
+  const pageScroll = await page.locator('body').getAttribute('data-page-scroll');
+  if (pageScroll === 'true') {
+    const widths = await page.evaluate(() => ({viewport:innerWidth,document:document.documentElement.scrollWidth}));
+    if (widths.document > widths.viewport + 1) throw new Error(`${label} overflows horizontally`);
+    for (const selector of ['.topbar','.mode-tabs','.compact-progress','.garden-peek','.board-wrap','.composer','.tools','.ledger']) {
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const reachable = await page.locator(selector).evaluate(el => {const b=el.getBoundingClientRect();return b.top>=-1&&b.bottom<=innerHeight+1&&b.left>=-1&&b.right<=innerWidth+1;});
+      if (!reachable) throw new Error(`${label} cannot reach ${selector}`);
+    }
+    await page.evaluate(() => window.scrollTo(0,0));
+    return;
+  }
   const result = await page.evaluate(() => {
     const sections = ['.topbar', '.mode-tabs', '.compact-progress', '.garden-peek', '.board-wrap', '.composer', '.tools', '.ledger'];
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const overflowing = [];
+    const feedback = document.querySelector('.tester-feedback__cta')?.getBoundingClientRect();
+    const ledger = document.querySelector('.ledger')?.getBoundingClientRect();
+    if (feedback && ledger && (feedback.left < ledger.left || feedback.right > ledger.right || feedback.top < ledger.top || feedback.bottom > ledger.bottom)) overflowing.push('feedback outside ledger');
+
 
     for (const selector of sections) {
       const element = document.querySelector(selector);
@@ -588,52 +605,56 @@ async function expectViewportFit(page, label) {
 }
 
 async function expectBoardFullyVisible(page, label) {
+  // Measure settled tiles after the clue reveal's intentional bloom animation.
+  await page.locator('.board').evaluate(async board => {
+    await Promise.all(board.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})));
+  });
+  // Large crosswords scroll inside their own region; letters must never shrink
+  // below a readable size just to satisfy a no-scroll viewport assertion.
   const result = await page.evaluate(() => {
-    const wrap = document.querySelector('.board-wrap');
+    const viewport = document.querySelector('.board-viewport');
     const board = document.querySelector('.board');
-    const tiles = [...document.querySelectorAll('.tile')];
+    const tiles = [...document.querySelectorAll('.board .tile')];
+    if (!viewport || !board || !tiles.length) return { missing: true };
+    const sizes = tiles.map(tile => tile.getBoundingClientRect().width);
+    const fonts = tiles.map(tile => parseFloat(getComputedStyle(tile).fontSize));
+    const luminance = color => {
+      const values = color.match(/[\d.]+/g).slice(0,3).map(Number).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+      return values[0] * .2126 + values[1] * .7152 + values[2] * .0722;
+    };
+    const guidanceContrast = ['.current-word', '.board-scroll-hint'].map(selector => {
+      const style = getComputedStyle(document.querySelector(selector));
+      const rgba = style.backgroundColor.match(/[\d.]+/g).map(Number);
+      if (rgba.length === 4 && rgba[3] < 1) return 0;
+      const a = luminance(style.color), b = luminance(style.backgroundColor);
+      return (Math.max(a,b) + .05) / (Math.min(a,b) + .05);
+    });
 
-    if (!wrap || !board || tiles.length === 0) {
-      return { missing: true };
-    }
-
-    const wrapBox = wrap.getBoundingClientRect();
-    const boardBox = board.getBoundingClientRect();
-    const clippedTiles = tiles
-      .map((tile, index) => ({ index, box: tile.getBoundingClientRect() }))
-      .filter(
-        ({ box }) =>
-          box.left < wrapBox.left - 1 ||
-          box.top < wrapBox.top - 1 ||
-          box.right > wrapBox.right + 1 ||
-          box.bottom > wrapBox.bottom + 1
-      )
-      .map(({ index, box }) => `${index}:${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.right)},${Math.round(box.bottom)}`);
-
-    return {
-      missing: false,
-      tileCount: tiles.length,
-      tileSize: Math.round(tiles[0].getBoundingClientRect().width),
-      fitTileSize: board.style.getPropertyValue('--fit-tile-size'),
-      wrap: `${Math.round(wrapBox.width)}x${Math.round(wrapBox.height)}`,
-      board: `${Math.round(boardBox.width)}x${Math.round(boardBox.height)}`,
-      clippedTiles
+    const letters = [...document.querySelectorAll('.letter')].map(el => el.getBoundingClientRect());
+    const overlap = letters.some((a, i) => letters.slice(i + 1).some(b => Math.hypot((a.left+a.width/2)-(b.left+b.width/2), (a.top+a.height/2)-(b.top+b.height/2)) < (a.width+b.width)/2 + 2));
+    return { missing: false, minTile: Math.min(...sizes), minFont: Math.min(...fonts), overlap,
+      wheelMin: Math.min(...[...document.querySelectorAll('.letter')].map(tile => tile.getBoundingClientRect().width)),
+      keyboardReachable: viewport.tabIndex === 0, viewportHeight: viewport.clientHeight, guidanceContrast: Math.min(...guidanceContrast),
+      overflowX: viewport.scrollWidth > viewport.clientWidth,
+      overflowY: viewport.scrollHeight > viewport.clientHeight,
+      hint: document.querySelector('.board-scroll-hint')?.textContent || ''
     };
   });
-
-  if (result.missing) {
-    throw new Error(`${label} board is missing`);
+  if (result.missing || result.viewportHeight < 96 || result.minTile < 32 || result.minFont < 18 || result.wheelMin < 44 || result.overlap || result.guidanceContrast < 4.5 || !result.keyboardReachable) {
+    throw new Error(`${label} unreadable or inaccessible board: ${JSON.stringify(result)}`);
   }
-
-  if (result.clippedTiles.length > 0) {
-    throw new Error(
-      `${label} clips puzzle tiles: tile ${result.tileSize}px, wrap ${result.wrap}, board ${result.board}, clipped ${result.clippedTiles.join('; ')}`
-    );
+  if ((result.overflowX || result.overflowY) && !result.hint.trim()) throw new Error(`${label} missing scroll affordance`);
+  const originalScroll = await page.locator('.board-viewport').evaluate(el => ({left: el.scrollLeft, top: el.scrollTop}));
+  const tiles = page.locator('.board .tile');
+  for (let i = 0; i < await tiles.count(); i++) {
+    await tiles.nth(i).scrollIntoViewIfNeeded();
+    const reachable = await tiles.nth(i).evaluate(tile => {
+      const b=tile.getBoundingClientRect(), v=document.querySelector('.board-viewport').getBoundingClientRect();
+      return b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1;
+    });
+    if (!reachable) throw new Error(`${label} tile ${i} is unreachable`);
   }
-
-  if (!Number.isFinite(result.tileSize) || result.tileSize <= 0 || result.fitTileSize.includes('NaN')) {
-    throw new Error(`${label} has invalid fitted tile size: ${result.fitTileSize || result.tileSize}`);
-  }
+  await page.locator('.board-viewport').evaluate((el, pos) => el.scrollTo(pos.left, pos.top), originalScroll);
 }
 
 async function expectDailyProgressDisplay(page) {
@@ -788,6 +809,36 @@ try {
     await largeRandomStart.page.keyboard.press('Escape');
     if (await largeRandomStart.page.locator('[data-action="board"]').evaluate(el => el !== document.activeElement)) throw new Error('Expanded board must restore focus');
     await largeRandomStart.context.close();
+    const nineLetters = await freshPage(browser, {viewport: {width:360,height:640}, isMobile:true, hasTouch:true}, {levelIndex:35, campaign:{completedLevels:35,bestRun:35,lastCompletedLevelId:35,puzzleOrder:sequentialPuzzleOrder}});
+    await expectViewportFit(nineLetters.page, 'nine-letter compact phone');
+    await expectBoardFullyVisible(nineLetters.page, 'nine-letter compact phone');
+    await nineLetters.page.locator('[data-action="hint"]').click();
+    await nineLetters.page.locator('#hint-word').selectOption('0');
+    await nineLetters.page.locator('[data-action="buy-clue"]').click();
+    await expectBoardFullyVisible(nineLetters.page, 'nine-letter compact phone after clue');
+    await expectViewportFit(nineLetters.page, 'nine-letter compact phone after clue');
+
+    await submitByTap(nineLetters.page, 'EVERGREEN');
+    await expectProgress(nineLetters.page, `1/${levels[35].targets.length}`);
+    await nineLetters.context.close();
+    const shortPhone = await freshPage(browser, {viewport:{width:320,height:568},isMobile:true,hasTouch:true}, {levelIndex:35,campaign:{completedLevels:35,bestRun:35,lastCompletedLevelId:35,puzzleOrder:sequentialPuzzleOrder}});
+    await expectBoardFullyVisible(shortPhone.page, 'short nine-letter phone');
+    await shortPhone.page.locator('[data-action="hint"]').click();
+    await shortPhone.page.locator('#hint-word').selectOption('0');
+    await shortPhone.page.locator('[data-action="buy-clue"]').click();
+    await expectCoins(shortPhone.page, 35);
+    await expectBoardFullyVisible(shortPhone.page, 'short phone after clue feedback');
+
+    for (const selector of ['.board-viewport', '.wheel', '.tools', '.ledger']) {
+      await shortPhone.page.locator(selector).scrollIntoViewIfNeeded();
+      const inView = await shortPhone.page.locator(selector).evaluate(el => { const b=el.getBoundingClientRect(); return b.top >= -1 && b.bottom <= innerHeight+1 && b.left >= -1 && b.right <= innerWidth+1; });
+      if (!inView) throw new Error(`Short phone cannot reach ${selector}`);
+    }
+    await submitByTap(shortPhone.page, 'EVERGREEN');
+    await expectProgress(shortPhone.page, `1/${levels[35].targets.length}`);
+    await shortPhone.context.close();
+
+
 
     const tap = await freshPage(browser, { viewport: { width: 390, height: 844 }, isMobile: true });
     await tapWithMouse(tap.page, 'TAP');
@@ -833,6 +884,7 @@ try {
     await midnight.page.evaluate(() => window.dispatchEvent(new Event('focus')));
     if (sortedLetters(await wheelLetters(midnight.page)) !== sortedLetters(tomorrow.letters)) throw new Error('Daily rollover must update letter wheel');
     await expectCurrentWord(midnight.page, 'TAP OR SWIPE LETTERS');
+    if (await midnight.page.locator('body').getAttribute('data-scene') !== getLevelTheme(tomorrow).scene) throw new Error('Daily theme must follow rollover');
     await submitByTap(midnight.page, tomorrow.targets[0]);
     await expectProgress(midnight.page, `1/${tomorrow.targets.length}`);
     await midnight.context.close();
@@ -845,6 +897,7 @@ try {
       }
     }
     await expectLevelTwo(completion.page);
+    if (await completion.page.locator('body').getAttribute('data-scene') !== getLevelTheme(levels[1]).scene) throw new Error('Theme must follow next puzzle');
     await expectLedgerMessage(completion.page, 'Level 1 complete! +10 coins. Next: Level 2.');
     await expectLevelCompleteOverlay(completion.page, 'Level 1 complete', 'Level 1 complete! +10 coins. Next: Level 2.');
     await expectCampaignJourney(completion.page, 1);
@@ -867,6 +920,7 @@ try {
       }
     }
     await expectLevelThree(completion.page);
+    if (await completion.page.locator('body').getAttribute('data-scene') !== getLevelTheme(levels[2]).scene) throw new Error('Orchard must show its associated scenery');
     await completion.context.close();
 
     const themeUnlock = await freshPage(
