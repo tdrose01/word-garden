@@ -1,5 +1,6 @@
+import { getGardenView } from './garden.js';
 import { isDictionaryWord } from './dictionary.js';
-import { buildGrid, getDailyLevel, getDateKey, levels, legacyLevels, LEVEL_VERSION } from './levels.js';
+import { buildGrid, getDailyLevel, getDateKey, levels, legacyLevels, versionTwoLevels, LEVEL_VERSION } from './levels.js';
 import { canBuildWord, normalizeWord } from './word-utils.js';
 
 export { canBuildWord };
@@ -31,16 +32,18 @@ export function resetState(storage = window.localStorage, random = Math.random) 
 }
 
 export function getLevel(state) {
+  if (state.mode === 'replay' && state.replay) return levels[state.replay.levelIndex] || levels[0];
   if (state.mode === 'daily') {
     const progress = getDailyProgress(state);
     return getDailyLevel(new Date(`${progress.dateKey}T00:00:00.000Z`), progress.levelVersion);
   }
 
-  return state.campaignLevelVersion === 1 ? legacyLevels[getCampaignPuzzleIndex(state)] : levels[getCampaignPuzzleIndex(state)];
+  const catalog = state.campaignLevelVersion === 1 ? legacyLevels : state.campaignLevelVersion === 2 ? versionTwoLevels : levels;
+  return catalog[getCampaignPuzzleIndex(state)] || catalog[0];
 }
 
 export function getProgress(state) {
-  return state.mode === 'daily' ? getDailyProgress(state) : state;
+  return state.mode === 'replay' && state.replay ? state.replay : state.mode === 'daily' ? getDailyProgress(state) : state;
 }
 
 export function setMode(state, mode) {
@@ -56,6 +59,10 @@ export function createSnapshot(state) {
     level,
     placements,
     progress,
+    settings: getSettings(state),
+    replayStats: { active: state.mode === 'replay', levelIndex: state.replay?.levelIndex ?? null },
+    levelMap: createLevelMap(state),
+    dailyObjective: getDailyObjective(state),
     campaignStats: createCampaignStats(state),
     dailyStats: getDailyStatsView(state),
     gardenStats: createGardenStats(state),
@@ -101,14 +108,21 @@ export function submitWord(input, state) {
       return { state, status: 'repeat', message: 'Bonus already banked.' };
     }
 
-    return {
-      state: updateProgress(
-        { ...state, coins: state.coins + 2 },
-        { ...progress, bonusFound: [...progress.bonusFound, word] }
-      ),
-      status: 'bonus',
-      message: 'Bonus word. +2 coins.'
-    };
+    const replay = state.mode === 'replay';
+    let nextState = updateProgress({ ...state, coins: state.coins + (replay ? 0 : 2) },
+      { ...progress, bonusFound: [...progress.bonusFound, word] });
+    let objectiveReward = 0;
+    if (state.mode === 'daily') {
+      const objective = getDailyObjective(nextState);
+      if (objective.complete && !objective.claimed) {
+        objectiveReward = objective.reward;
+        const daily = getDailyProgress(nextState);
+        nextState = { ...nextState, coins: nextState.coins + objectiveReward,
+          daily: { ...daily, objectiveClaimed: true },
+          dailyStats: { ...getDailyStats(nextState), objectiveDates: [...getDailyStats(nextState).objectiveDates, daily.dateKey] } };
+      }
+    }
+    return { state: nextState, status: 'bonus', message: replay ? 'Replay bonus found.' : objectiveReward ? `Daily goal complete! +${2 + objectiveReward} coins.` : 'Bonus word. +2 coins.' };
   }
 
   return { state, status: 'invalid', message: 'Not in this puzzle.' };
@@ -131,13 +145,13 @@ export function useHint(state, options = {}) {
   const chosen = options.cellKey ? candidates.find(cell => cell.cellKey === options.cellKey) : candidates[0];
   if (!chosen) return { state, status: 'blocked', message: 'No hidden letters there. Choose another word or cell.' };
   const price = clue ? 5 : 10;
-  const free = hints.freeRescueAvailable;
+  const free = state.mode === 'replay' || hints.freeRescueAvailable;
   if (!free && state.coins < price) return { state, status: 'blocked', message: `Need ${price} coins. Try a 5-coin clue or find a bonus word.` };
   return {
     state: updateProgress({ ...state, coins: state.coins - (free ? 0 : price) }, {
       ...progress, revealed: [...progress.revealed, chosen.revealKey], rescueUsed: progress.rescueUsed || free
     }),
-    status: 'hint', message: free ? 'Free rescue: one letter revealed.' : clue ? 'Word clue: next hidden letter revealed.' : 'Selected letter revealed.'
+    status: 'hint', message: state.mode === 'replay' ? 'Practice hint: one letter revealed.' : free ? 'Free rescue: one letter revealed.' : clue ? 'Word clue: next hidden letter revealed.' : 'Selected letter revealed.'
   };
 }
 
@@ -161,10 +175,10 @@ function createGardenStats(state) {
   const campaign = getCampaignProgress(state);
   const dailyCompletions = getDailyStats(state).totalCompletions;
   const totalCompletions = campaign.completedLevels + dailyCompletions;
-  const packEnds = levels.flatMap((level, index) => levels[index + 1]?.pack !== level.pack ? [index + 1] : []);
-  const completedPacks = Math.floor(campaign.completedLevels / levels.length) * packEnds.length + packEnds.filter(end => end <= campaign.completedLevels % levels.length).length;
+  const completedPacks = campaign.completedPacks;
   const nextAt = (Math.floor(totalCompletions / 5) + 1) * 5;
   return {
+    ...getGardenView(state, totalCompletions),
     flowers: totalCompletions, trees: Math.floor(totalCompletions / 5), butterflies: Math.floor(totalCompletions / 10),
     totalCompletions, dailyCompletions, completedPacks,
     nextUnlock: { label: nextAt % 10 === 0 ? 'Butterfly and tree' : 'Tree', remaining: nextAt - totalCompletions, at: nextAt }
@@ -211,13 +225,11 @@ function getPlacementCellKey(placement, index) {
 }
 
 function getCampaignPuzzleIndex(state) {
-  const campaign = getCampaignProgress(state);
-  const orderIndex = campaign.completedLevels % campaign.puzzleOrder.length;
-  const puzzleIndex = campaign.puzzleOrder[orderIndex];
-  return Number.isInteger(puzzleIndex) && puzzleIndex >= 0 && puzzleIndex < levels.length ? puzzleIndex : 0;
+  return getCampaignProgress(state).cursor;
 }
 
 function advanceLevel(state) {
+  if (state.mode === 'replay') return { ...state, replay: { ...state.replay, completed: true } };
   if (state.mode === 'daily') {
     const daily = getDailyProgress(state);
     const dailyStats = getDailyStats(state);
@@ -238,7 +250,7 @@ function advanceLevel(state) {
   return {
     ...state,
     mode: 'campaign',
-    levelIndex: state.levelIndex + 1,
+    levelIndex: campaign.completedLevels,
     coins: state.coins,
     solved: [],
     bonusFound: [],
@@ -252,11 +264,13 @@ function advanceLevel(state) {
 }
 
 function normalizeState(state, random) {
+  state = { ...state, campaignLevelVersion: state.campaignLevelVersion || 1 };
   const campaign = getCampaignProgress(state, random);
 
   return {
     ...state,
-    mode: state.mode === 'daily' ? 'daily' : 'campaign',
+    mode: state.mode === 'replay' && state.replay && Number.isInteger(state.replay.levelIndex) && levels[state.replay.levelIndex] ? 'replay' : state.mode === 'daily' ? 'daily' : 'campaign',
+    settings: getSettings(state),
     levelIndex: campaign.completedLevels,
     campaignLevelVersion: state.campaignLevelVersion || 1,
     rescueUsed: Boolean(state.rescueUsed),
@@ -274,6 +288,8 @@ function createInitialState(random = Math.random) {
     mode: 'campaign',
     levelIndex: 0,
     campaignLevelVersion: LEVEL_VERSION,
+    settings: { sound: false, haptics: true },
+    garden: { plots: [] },
     rescueUsed: false,
     coins: 40,
     solved: [],
@@ -286,11 +302,11 @@ function createInitialState(random = Math.random) {
 }
 
 function createCampaignStats(state) {
-  const levelIndex = Number.isFinite(state.levelIndex) && state.levelIndex >= 0 ? state.levelIndex : 0;
+  const levelIndex = getCampaignProgress(state).cursor;
   const totalLevels = levels.length;
   const pathIndex = levelIndex % totalLevels;
   const campaign = getCampaignProgress(state);
-  const completedInJourney = campaign.completedLevels % totalLevels;
+  const completedInJourney = campaign.completedIds.length;
   const pathLoop = Math.floor(campaign.completedLevels / totalLevels) + 1;
   const level = levels[pathIndex];
   const pack = level.pack || 'Garden Path';
@@ -334,6 +350,9 @@ function createCampaignStats(state) {
 function createCampaignProgress(random) {
   return {
     completedLevels: 0,
+    cursor: 0,
+    completedIds: [],
+    completedPacks: 0,
     bestRun: 0,
     lastCompletedLevelId: 0,
     puzzleOrder: createSequentialPuzzleOrder()
@@ -364,16 +383,19 @@ function normalizePuzzleOrder(order) {
 
 function getCampaignProgress(state, random) {
   const campaign = state.campaign || {};
-  const fallbackCompleted =
-    state.startRandomizerVersion && isUnclearedCampaignState(state) && !Number.isFinite(campaign.completedLevels)
-      ? 0
-      : state.levelIndex;
-  const completedLevels = Number.isFinite(campaign.completedLevels)
-    ? Math.max(0, campaign.completedLevels)
-    : Math.max(0, Number.isFinite(fallbackCompleted) ? fallbackCompleted : 0);
-
+  const fallback = state.startRandomizerVersion && isUnclearedCampaignState(state) && !Number.isFinite(campaign.completedLevels) ? 0 : state.levelIndex;
+  const completedLevels = Math.max(0, Math.floor(Number.isFinite(campaign.completedLevels) ? campaign.completedLevels : Number.isFinite(fallback) ? fallback : 0));
+  const oldCatalog = state.campaignLevelVersion === 1 || state.campaignLevelVersion === 2;
+  const catalogLength = oldCatalog ? legacyLevels.length : levels.length;
+  const cursor = Number.isInteger(campaign.cursor) && campaign.cursor >= 0 && campaign.cursor < catalogLength ? campaign.cursor : completedLevels % catalogLength;
+  const completedIds = Array.isArray(campaign.completedIds)
+    ? [...new Set(campaign.completedIds.filter(index => Number.isInteger(index) && index >= 0 && index < levels.length))]
+    : Array.from({ length: Math.min(completedLevels, catalogLength) }, (_, index) => index);
+  const catalog = oldCatalog ? legacyLevels : levels;
+  const ends = catalog.flatMap((level, index) => catalog[index + 1]?.pack !== level.pack ? [index + 1] : []);
+  const completedPacks = Number.isInteger(campaign.completedPacks) && campaign.completedPacks >= 0 ? campaign.completedPacks : Math.floor(completedLevels / catalogLength) * ends.length + ends.filter(end => end <= completedLevels % catalogLength).length;
   return {
-    completedLevels,
+    completedLevels, cursor, completedIds, completedPacks,
     bestRun: Number.isFinite(campaign.bestRun) ? Math.max(0, campaign.bestRun) : completedLevels,
     lastCompletedLevelId: Number.isFinite(campaign.lastCompletedLevelId) ? campaign.lastCompletedLevelId : 0,
     puzzleOrder: createCampaignPuzzleOrder(random)
@@ -396,6 +418,9 @@ function completeCampaignProgress(campaign, completedLevelNumber) {
   return {
     ...campaign,
     completedLevels,
+    cursor: (campaign.cursor + 1) % levels.length,
+    completedIds: [...new Set([...campaign.completedIds, campaign.cursor])],
+    completedPacks: campaign.completedPacks + (levels[campaign.cursor + 1]?.pack !== levels[campaign.cursor].pack ? 1 : 0),
     bestRun: Math.max(campaign.bestRun, completedLevels),
     lastCompletedLevelId: completedLevelNumber
   };
@@ -426,6 +451,7 @@ function getDailyProgress(state) {
     solved: Array.isArray(state.daily.solved) ? state.daily.solved : [],
     bonusFound: Array.isArray(state.daily.bonusFound) ? state.daily.bonusFound : [],
     revealed: Array.isArray(state.daily.revealed) ? state.daily.revealed : [],
+    objectiveClaimed: Boolean(state.daily.objectiveClaimed),
     completed: Boolean(state.daily.completed)
   };
 }
@@ -434,6 +460,7 @@ function createDailyStats() {
   return {
     streak: 0,
     totalCompletions: 0,
+    objectiveDates: [],
     bestStreak: 0,
     lastCompletedDate: '',
     reward: 10
@@ -443,6 +470,7 @@ function createDailyStats() {
 function getDailyStats(state) {
   const stats = state.dailyStats || {};
   return {
+    objectiveDates: Array.isArray(stats.objectiveDates) ? [...new Set(stats.objectiveDates.filter(date => typeof date === 'string'))] : [],
     totalCompletions: Number.isFinite(stats.totalCompletions) ? Math.max(0, Math.floor(stats.totalCompletions)) : Math.max(stats.bestStreak || 0, stats.streak || 0, stats.lastCompletedDate || state.daily?.completed ? 1 : 0),
     streak: Number.isFinite(stats.streak) ? stats.streak : 0,
     bestStreak: Number.isFinite(stats.bestStreak) ? stats.bestStreak : 0,
@@ -468,6 +496,7 @@ function getDailyStatsView(state) {
 function completeDailyStats(stats, dateKey) {
   if (stats.lastCompletedDate === dateKey) {
     return {
+      objectiveDates: stats.objectiveDates,
       totalCompletions: stats.totalCompletions,
       streak: stats.streak,
       bestStreak: stats.bestStreak,
@@ -479,6 +508,7 @@ function completeDailyStats(stats, dateKey) {
   const streak = getDailyStreak(stats, dateKey);
 
   return {
+    objectiveDates: stats.objectiveDates,
     totalCompletions: stats.totalCompletions + 1,
     streak,
     bestStreak: Math.max(stats.bestStreak, streak),
@@ -505,6 +535,7 @@ function getDailyReward(stats, dateKey) {
 }
 
 function getCompletionReward(state) {
+  if (state.mode === 'replay') return 0;
   if (state.mode === 'daily') {
     return getDailyStatsView(state).reward;
   }
@@ -516,6 +547,7 @@ function getCompletionReward(state) {
 }
 
 function updateProgress(state, progress) {
+  if (state.mode === 'replay') return { ...state, replay: progress };
   if (state.mode === 'daily') {
     return {
       ...state,
@@ -533,6 +565,7 @@ function updateProgress(state, progress) {
 }
 
 function completionMessage(mode, reward, completedLevelNumber, state) {
+  if (mode === 'replay') return 'Replay complete. Your journey is safe.';
   if (mode === 'daily') {
     return `Daily complete. +${reward} coins.`;
   }
@@ -542,4 +575,49 @@ function completionMessage(mode, reward, completedLevelNumber, state) {
   return campaign.completedLevels % CAMPAIGN_MILESTONE_EVERY === 0
     ? `Level ${completedLevelNumber} complete! Milestone bonus: +${reward} coins. Next: Level ${nextLevelNumber}.`
     : `Level ${completedLevelNumber} complete! +${reward} coins. Next: Level ${nextLevelNumber}.`;
+}
+
+
+export function getSettings(state) {
+  return { sound: state.settings?.sound === true, haptics: state.settings?.haptics !== false };
+}
+
+export function updateSettings(state, changes) {
+  const settings = getSettings(state);
+  for (const key of ['sound', 'haptics']) if (typeof changes?.[key] === 'boolean') settings[key] = changes[key];
+  return { ...state, settings };
+}
+
+export function plantSeed(state, { plotIndex, plantId } = {}) {
+  const garden = createGardenStats(state);
+  if (!Number.isInteger(plotIndex) || plotIndex < 0 || plotIndex >= garden.unlockedPlots || !garden.plants.some(plant => plant.id === plantId))
+    return { state, status: 'blocked', message: 'Choose an unlocked plot and a plant.' };
+  if (garden.plots[plotIndex].plantId) return { state, status: 'blocked', message: 'A plant is already growing there.' };
+  if (garden.seedCredits < 1) return { state, status: 'blocked', message: 'Complete a puzzle to earn another seed.' };
+  const plots = garden.plots.filter(plot => plot.plantId).map(({ index, plantId, plantedAt }) => ({ index, plantId, plantedAt }));
+  return { state: { ...state, garden: { plots: [...plots, { index: plotIndex, plantId, plantedAt: garden.totalCompletions }] } }, status: 'planted', message: 'Your new plant is growing!' };
+}
+
+function createLevelMap(state) {
+  const campaign = getCampaignProgress(state);
+  return levels.map((level, levelIndex) => ({ levelIndex, title: level.title, pack: level.pack,
+    completed: campaign.completedIds.includes(levelIndex), current: levelIndex === campaign.cursor,
+    unlocked: campaign.completedIds.includes(levelIndex) || levelIndex === campaign.cursor }));
+}
+
+export function startReplay(state, levelIndex) {
+  if (!Number.isInteger(levelIndex) || !createLevelMap(state)[levelIndex]?.completed)
+    return { state, status: 'blocked', message: 'That clearing is still ahead of you.' };
+  return { state: { ...state, mode: 'replay', replay: { levelIndex, solved: [], bonusFound: [], revealed: [], rescueUsed: false, completed: false } }, status: 'replay', message: 'Practice freely. Hints are free; journey rewards stay in your journey.' };
+}
+
+export function exitReplay(state) {
+  return { ...state, mode: 'campaign', replay: null };
+}
+
+function getDailyObjective(state) {
+  const daily = getDailyProgress(state);
+  const found = daily.bonusFound.length;
+  return { found, goal: 3, reward: 10, complete: found >= 3,
+    claimed: Boolean(daily.objectiveClaimed || getDailyStats(state).objectiveDates.includes(daily.dateKey)) };
 }

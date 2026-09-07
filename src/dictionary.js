@@ -1,3 +1,5 @@
+import { commonWords } from './common-words.js';
+import { contentWords } from './content.js';
 import { canBuildWord, normalizeWord } from './word-utils.js';
 
 // Hand-curated common words and inflections; no third-party dictionary dataset.
@@ -422,7 +424,7 @@ const WORDS = [
   'WOOD'
 ];
 
-export const curatedDictionary = [...new Set([...WORDS, ...ADDITIONAL_WORDS].map(normalizeWord))].sort();
+export const curatedDictionary = [...new Set([...WORDS, ...ADDITIONAL_WORDS, ...contentWords, ...commonWords].map(normalizeWord))].sort();
 export const dictionarySet = new Set(curatedDictionary);
 
 export function isDictionaryWord(word) {

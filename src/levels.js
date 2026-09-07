@@ -1,3 +1,4 @@
+import { newCampaignContent, newDailyContent } from './content.js';
 export const legacyLevels = [
   {
     id: 1,
@@ -328,21 +329,30 @@ export const legacyDailyLevels = [
 ];
 
 // Keep the original boards available solely to finish saves made before version 2.
-export const LEVEL_VERSION = 2;
-export const levels = legacyLevels.map((level, index) => {
+export const LEVEL_VERSION = 3;
+export const versionTwoLevels = legacyLevels.map((level, index) => {
   const extraCount = index < 12 ? 0 : index < 24 ? 1 : 2;
   const extra = [...level.bonus].sort((a, b) => b.length - a.length).slice(0, extraCount);
   return { ...level, targets: [...level.targets, ...extra], bonus: level.bonus.filter(word => !extra.includes(word)) };
 });
 
 // Forty-one distinct boards; consecutive UTC days traverse the entire pool.
-export const dailyLevels = [...legacyDailyLevels, ...levels.map(level => ({
+export const versionTwoDailyLevels = [...legacyDailyLevels, ...versionTwoLevels.map(level => ({
   ...level, id: `daily-${level.id}`, title: `Daily ${level.title}`
 }))];
 
+// Existing identifiers remain stable. New chapters introduce short familiar
+// families before six- and eight-letter families; occasional short rests help.
+export const levels = [...versionTwoLevels, ...newCampaignContent.map((level, index) => ({
+  ...level, id: index + 37, title: `Clearing ${index + 1}`,
+  pack: ['Orchard Walk', 'Kitchen Garden', 'Evening Lights', 'River Journey', 'Changing Seasons', 'Blossom Trail', 'Living Woodland'][Math.floor(index / 10)],
+  difficulty: level.letters.length <= 5 ? 'Gentle' : level.letters.length <= 7 ? 'Growing' : 'Challenge'
+}))];
+export const dailyLevels = newDailyContent;
+
 export function getDailyLevel(date = new Date(), version = LEVEL_VERSION) {
   const key = getDateKey(date);
-  const pool = version === 1 ? legacyDailyLevels : dailyLevels;
+  const pool = version === 1 ? legacyDailyLevels : version === 2 ? versionTwoDailyLevels : dailyLevels;
   const seed = version === 1
     ? Array.from(key).reduce((total, char) => total + char.charCodeAt(0), 0)
     : Math.floor(Date.parse(`${key}T00:00:00.000Z`) / 86400000);

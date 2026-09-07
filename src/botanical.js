@@ -1,0 +1,22 @@
+// Hand-drawn SVG plants share a visual language in scenery, plots and rewards.
+export function plantArt(plant = {}, stage = 'blooming') {
+  const color = /^#[a-f\d]{3,8}$/i.test(plant.color || '') ? plant.color : '#cf7e9b';
+  const id = plant.id || plant.plantId || '';
+  const stem = '<path d="M40 85Q35 59 42 30" fill="none" stroke="#3c7553" stroke-width="3" stroke-linecap="round"/><path d="M39 66Q12 42 17 65Q25 76 39 70M40 51Q65 26 65 50Q56 61 40 57" fill="#689763"/><path d="M21 64L37 68M60 48L43 54" stroke="#adc98b" stroke-width="1"/>';
+  if (stage === 'seedling') return '<ellipse cx="40" cy="86" rx="24" ry="5" fill="#34573a22"/><path d="M40 84V65" stroke="#3c7553" stroke-width="3"/><path d="M40 71Q17 48 20 68Q28 80 40 74M40 69Q60 43 62 63Q57 75 40 72" fill="#79a569"/>';
+  if (stage === 'growing') return `<ellipse cx="40" cy="86" rx="24" ry="5" fill="#34573a22"/>${stem}<path d="M42 36Q29 15 42 14Q54 16 42 36" fill="${color}"/>`;
+  let bloom;
+  if (/lavender|sage/i.test(id)) bloom = [0,1,2,3,4].map(i => `<ellipse cx="${38+i%2*7}" cy="${12+i*5}" rx="6" ry="4" fill="${color}"/>`).join('');
+  else if (/fern/i.test(id)) bloom = [0,1,2,3,4].map(i => `<path d="M41 ${22+i*9}Q${12+i*4} ${9+i*9} ${18+i*4} ${25+i*9}L41 ${28+i*9}Q${72-i*3} ${7+i*9} ${66-i*3} ${25+i*9}Z" fill="#649166"/>`).join('');
+  else bloom = `<g transform="translate(42 26)">${Array.from({length:8},(_,i)=>`<ellipse cy="-12" rx="7" ry="13" transform="rotate(${i*45})" fill="${color}" stroke="#fff6e8" stroke-width=".6"/>`).join('')}<circle r="7" fill="#e9b956"/><circle cx="-2" cy="-2" r="2" fill="#fff1b6"/></g>`;
+  return `<ellipse cx="40" cy="86" rx="24" ry="5" fill="#34573a22"/>${stem}${bloom}`;
+}
+
+export function botanicalScenery(theme) {
+  const c = theme.colors;
+  const branches = [0,1].map(side => `<g transform="translate(${side ? 600 : 0} 0) scale(${side ? -1 : 1} 1)"><path d="M-25 580Q120 300 48-40" fill="none" stroke="#476c50" stroke-width="25"/><path d="M34 108Q145 87 183 20M54 221Q154 195 192 121" fill="none" stroke="#567958" stroke-width="9"/>${[0,1,2,3,4,5].map(i=>`<g transform="translate(${25+i%2*35} ${35+i*57}) rotate(${-30+i*9})"><path d="M0 0Q66-59 105-21Q69 22 0 0" fill="${i%2 ? '#6e9467' : '#4c7956'}"/><path d="M4 0L92-18" stroke="#b3c18a" stroke-width="1.5"/></g>`).join('')}</g>`).join('');
+  const flowers = [15,78,145,437,505,567].map((x,i)=>`<g transform="translate(${x-30} ${720+i%3*22}) scale(1.2)">${plantArt({id:i%2?'lavender':'daisy',color:i%2?'#a792b9':c.accent})}</g>`).join('');
+  const extras = theme.scene === 'brook' ? `<path d="M365 560Q128 664 316 730T193 900" fill="none" stroke="#a8ccd0" stroke-width="90"/><path d="M359 572Q169 658 310 733" fill="none" stroke="#eef8ed" stroke-width="3"/>` : theme.scene === 'moonlight' ? '<circle cx="420" cy="220" r="40" fill="#eee8c4"/><circle cx="436" cy="207" r="34" fill="#e5e9f3"/>' : '<circle cx="427" cy="238" r="48" fill="#f9dfa0" opacity=".8"/>';
+  const horizon = theme.scene === 'alpine' ? '<path d="M-80 740L125 250L340 740M245 740L490 200L740 740" fill="#90a7a5"/><path d="M90 333L125 250L166 342L132 321L113 347M445 302L490 200L537 305L500 285L474 317" fill="#f9faf0"/>' : theme.scene === 'canyon' ? '<path d="M0 425H100L133 570H183L218 790H0M600 370H523L490 541H450L405 790H600" fill="#c89b7e"/><path d="M0 505H117M0 562H131M600 465H506M600 529H493" stroke="#e0bda0" stroke-width="10"/>' : '' ;
+  return `<svg class="level-scenery botanical-backdrop" data-scene="${theme.scene}" viewBox="0 0 600 900" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="botanical-sky" x2="0" y2="1"><stop stop-color="${c.sky}"/><stop offset="1" stop-color="${c.ground}"/></linearGradient><radialGradient id="garden-glow"><stop stop-color="#fffbee" stop-opacity=".95"/><stop offset="1" stop-color="#fffbee" stop-opacity="0"/></radialGradient></defs><rect width="600" height="900" fill="url(#botanical-sky)"/><ellipse cx="325" cy="320" rx="260" ry="340" fill="url(#garden-glow)"/>${extras}${horizon}<path d="M0 678Q128 573 300 670T600 610V900H0Z" fill="${c.mist}"/><path d="M0 785Q165 653 343 774T600 716V900H0Z" fill="${c.ground}"/><path d="M254 900Q393 754 305 684" fill="none" stroke="#e4d4ac" stroke-width="53" opacity=".7"/>${branches}${flowers}<g fill="#fff4c3" opacity=".8"><circle cx="113" cy="425" r="3"/><circle cx="454" cy="527" r="2"/><circle cx="518" cy="367" r="3"/><circle cx="184" cy="621" r="2"/></g></svg>`;
+}
