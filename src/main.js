@@ -51,9 +51,7 @@ function render() {
   const theme = getLevelTheme(snapshot.level);
   document.body.dataset.scene = theme.scene;
   for (const [name, value] of Object.entries(theme.colors)) document.body.style.setProperty(`--scene-${name}`, value);
-  const previousViewport = app.querySelector('.board-viewport');
   const boardKey = `${state.mode}:${snapshot.level.id}:${snapshot.progress.dateKey || ''}:${state.levelIndex}`;
-  const savedScroll = previousViewport?.dataset.boardKey === boardKey ? { left: previousViewport.scrollLeft, top: previousViewport.scrollTop } : { left: 0, top: 0 };
   const progress = getProgress(state);
   const levelLabel = state.mode === 'daily' ? 'Daily' : `Level ${snapshot.campaignStats.currentLevel}`;
   const maxX = Math.max(...snapshot.cells.map((cell) => cell.x));
@@ -69,16 +67,17 @@ function render() {
         <h1>Word Garden</h1>
 
       </div>
+      <section class="mode-tabs" aria-label="Game mode">
+        <button class="${state.mode === 'campaign' ? 'is-active' : ''}" data-mode="campaign" aria-pressed="${state.mode === 'campaign'}">Levels</button>
+        <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily" aria-pressed="${state.mode === 'daily'}">Daily</button>
+      </section>
       <div class="coin-pill ${coinChanged ? 'is-bumped' : ''}" aria-label="${state.coins} coins"><span>${state.coins}</span></div>
     </section>
 
-    <section class="mode-tabs" aria-label="Game mode">
-      <button class="${state.mode === 'campaign' ? 'is-active' : ''}" data-mode="campaign" aria-pressed="${state.mode === 'campaign'}">Levels</button>
-      <button class="${state.mode === 'daily' ? 'is-active' : ''}" data-mode="daily" aria-pressed="${state.mode === 'daily'}">Daily</button>
+    <section class="journey-peek" aria-label="Progress and garden">
+      ${renderCompactProgress(snapshot)}
+      ${renderGarden(snapshot.gardenStats)}
     </section>
-
-    ${renderCompactProgress(snapshot)}
-    ${renderGarden(snapshot.gardenStats)}
 
     <section class="board-wrap" aria-label="${snapshot.level.title} puzzle board">
       <div class="level-card">
@@ -131,15 +130,14 @@ function render() {
         <button data-action="submit" class="primary">Submit</button>
         <button data-action="backspace">Back</button>
       </div>
+      <section class="tools" aria-label="Puzzle tools">
+        <button data-action="shuffle">Shuffle</button>
+        <button data-action="hint">Hints <small>from 5</small></button>
+        <button data-action="settings">Settings</button>
+      </section>
     </section>
 
-    <section class="tools">
-      <button data-action="shuffle">Shuffle</button>
-      <button data-action="hint">Hints · from 5</button>
-      <button data-action="settings">Settings</button>
-    </section>
-
-    <section class="ledger">
+    <section class="ledger" data-tone="${feedback?.tone || 'neutral'}">
       <button class="tester-feedback__cta" type="button" aria-expanded="false" aria-controls="tester-feedback-panel">
         Feedback
       </button>
@@ -148,7 +146,6 @@ function render() {
         <strong>${progress.bonusFound.length}</strong>
       </div>
       <p role="status" aria-live="polite" aria-atomic="true">${message}</p>
-      ${feedback ? `<strong class="feedback-toast feedback-toast--${feedback.tone}">${feedback.label}</strong>` : ''}
     </section>
 
     ${completion ? renderLevelComplete(completion) : ''}
@@ -162,10 +159,6 @@ function render() {
   bindGamePanel();
   updateSwipeGuide();
   fitBoard();
-  const viewport = app.querySelector('.board-viewport');
-  viewport.scrollTo(savedScroll.left, savedScroll.top);
-  updateBoardScrollHint();
-  viewport.addEventListener('scroll', updateBoardScrollHint, { passive: true });
   previousCoins = state.coins;
 }
 
@@ -743,27 +736,28 @@ function getLetterPoint(index) {
 function fitBoard() {
   const pageScroll = { x: window.scrollX, y: window.scrollY };
   app.style.removeProperty('min-height');
+  const boardRows = Number(app.querySelector('.board')?.style.getPropertyValue('--rows'));
+  app.dataset.compactBoard = boardRows >= 10 && window.innerHeight < 760 ? 'true' : 'false';
   delete document.body.dataset.pageScroll;
   const wheel = app.querySelector('.wheel');
   const letters = wheel?.querySelectorAll('.letter');
   if (letters?.length > 1) {
-    const letterWidth = parseFloat(getComputedStyle(letters[0]).width);
-    // Reserve space for the selected-letter scale as well as a clear gap.
-    // Letter centers sit on a circle with radius 34% of the wheel diameter.
-    const minimumDiameter = Math.ceil((letterWidth * 1.08 + 4) / (2 * .34 * Math.sin(Math.PI / letters.length)));
-    wheel.style.minWidth = `${minimumDiameter}px`;
+    const letterSize = parseFloat(getComputedStyle(letters[0]).width);
+    // Allow both neighboring buttons to be selected at once, plus a clear gap.
+    // The ring grows with the letter count, without wasting space outside it.
+    const radius = Math.max(52, (letterSize * 1.08 + 4) / (2 * Math.sin(Math.PI / letters.length)));
+    const diameter = Math.ceil(radius * 2 + letterSize * 1.08 + 6);
+    wheel.style.width = `${diameter}px`;
+    wheel.style.minWidth = `${diameter}px`;
+    letters.forEach((letter, index) => {
+      const angle = index / letters.length * Math.PI * 2 - Math.PI / 2;
+      letter.style.left = `${50 + Math.cos(angle) * radius / diameter * 100}%`;
+      letter.style.top = `${50 + Math.sin(angle) * radius / diameter * 100}%`;
+    });
   }
   const viewport = app.querySelector('.board-viewport');
   const board = app.querySelector('.board');
   if (!viewport || !board) return;
-  // Long wheels and wrapped feedback need more room than some screens offer.
-  // Preserve a useful grid window and let the page scroll to its controls.
-  for (let pass = 0; pass < 3 && viewport.clientHeight < 96; pass += 1) {
-    const deficit = 96 - viewport.clientHeight;
-    const overflow = Math.max(0, app.scrollHeight - app.clientHeight);
-    app.style.minHeight = `${Math.ceil(app.getBoundingClientRect().height + deficit + overflow + 2)}px`;
-  }
-  if (app.getBoundingClientRect().height > window.innerHeight + 1) document.body.dataset.pageScroll = 'true';
   const styles = getComputedStyle(board);
   const cols = Number(board.style.getPropertyValue('--cols'));
   const rows = Number(board.style.getPropertyValue('--rows'));
@@ -772,13 +766,15 @@ function fitBoard() {
   const paddingY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
   const fitWidth = (viewport.clientWidth - paddingX - gap * (cols - 1)) / cols;
   const fitHeight = (viewport.clientHeight - paddingY - gap * (rows - 1)) / rows;
-  // Keep words readable; larger boards scroll instead of shrinking their text.
-  const tileSize = Math.max(32, Math.min(46, Math.floor(Math.min(fitWidth, fitHeight))));
+  const minimumTile = window.innerWidth < 350 ? 22 : 24;
+  const tileSize = Math.min(46, Math.floor(fitWidth), Math.max(minimumTile, Math.floor(fitHeight)));
   board.style.setProperty('--fit-tile-size', `${tileSize}px`);
-  // Fitting the tiles can introduce a horizontal scrollbar. Account for its
-  // actual height before finalizing the usable puzzle window.
-  for (let pass = 0; pass < 2 && viewport.clientHeight < 96; pass += 1) {
-    app.style.minHeight = `${Math.ceil(app.getBoundingClientRect().height + 96 - viewport.clientHeight + 2)}px`;
+  // Exceptionally short screens can extend the page, but the complete board
+  // remains a single view: never a small independently scrolling window.
+  const requiredHeight = rows * tileSize + gap * (rows - 1) + paddingY;
+  const deficit = Math.max(0, requiredHeight - viewport.clientHeight);
+  if (deficit > 0) {
+    app.style.minHeight = `${Math.ceil(app.getBoundingClientRect().height + deficit)}px`;
     document.body.dataset.pageScroll = 'true';
   }
   if (document.body.dataset.pageScroll === 'true' && (pageScroll.x || pageScroll.y)) window.scrollTo(pageScroll.x, pageScroll.y);
@@ -789,16 +785,8 @@ function updateBoardScrollHint() {
   const viewport = app.querySelector('.board-viewport');
   const hint = app.querySelector('.board-scroll-hint');
   if (!viewport || !hint) return;
-  const horizontal = viewport.scrollWidth > viewport.clientWidth + 1;
-  const vertical = viewport.scrollHeight > viewport.clientHeight + 1;
-  const directions = [];
-  if (horizontal && viewport.scrollLeft > 1) directions.push('←');
-  if (horizontal && viewport.scrollLeft < viewport.scrollWidth - viewport.clientWidth - 1) directions.push('→');
-  if (vertical && viewport.scrollTop > 1) directions.push('↑');
-  if (vertical && viewport.scrollTop < viewport.scrollHeight - viewport.clientHeight - 1) directions.push('↓');
-  viewport.dataset.overflow = horizontal || vertical ? 'true' : 'false';
-  const label = horizontal || vertical ? `Scroll grid to see more ${directions.join(' ')}` : 'All words in view';
-  if (hint.textContent !== label) hint.textContent = label;
+  viewport.dataset.overflow = 'false';
+  hint.textContent = 'All words in view';
 }
 
 window.addEventListener('resize', fitBoard);

@@ -279,6 +279,7 @@ async function freshPage(browser, contextOptions = {}, stateOverrides = {}) {
   }, { overrides: stateOverrides, puzzleOrder: sequentialPuzzleOrder });
   await page.reload();
   await page.waitForSelector('.letter');
+  await page.evaluate(() => document.fonts.ready);
   return { context, page };
 }
 
@@ -605,12 +606,19 @@ async function expectViewportFit(page, label) {
 }
 
 async function expectBoardFullyVisible(page, label) {
+  const status = await page.locator('.ledger p').evaluate(el => {
+    const b=el.getBoundingClientRect(), parent=el.closest('.ledger').getBoundingClientRect();
+    const lineHeight=parseFloat(getComputedStyle(el).lineHeight);
+    const overlaps=[...el.closest('.ledger').children].filter(sibling => sibling!==el && getComputedStyle(sibling).display!=='none').some(sibling => {const r=sibling.getBoundingClientRect();return Math.min(b.right,r.right)>Math.max(b.left,r.left)+1&&Math.min(b.bottom,r.bottom)>Math.max(b.top,r.top)+1;});
+    return {height:b.height,lineHeight,overlaps,clipped:el.scrollHeight>el.clientHeight+1||b.bottom>parent.bottom+1||b.top<parent.top-1};
+  });
+  if (status.height < status.lineHeight-1 || status.overlaps || status.clipped) throw new Error(`${label} obscures gameplay feedback: ${JSON.stringify(status)}`);
   // Measure settled tiles after the clue reveal's intentional bloom animation.
   await page.locator('.board').evaluate(async board => {
     await Promise.all(board.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})));
   });
-  // Large crosswords scroll inside their own region; letters must never shrink
-  // below a readable size just to satisfy a no-scroll viewport assertion.
+  // Fit the entire crossword, retaining 18px letters and large wheel targets.
+  // Wide 13-column boards need smaller cells than ordinary six-column boards.
   const result = await page.evaluate(() => {
     const viewport = document.querySelector('.board-viewport');
     const board = document.querySelector('.board');
@@ -632,7 +640,7 @@ async function expectBoardFullyVisible(page, label) {
 
     const letters = [...document.querySelectorAll('.letter')].map(el => el.getBoundingClientRect());
     const overlap = letters.some((a, i) => letters.slice(i + 1).some(b => Math.hypot((a.left+a.width/2)-(b.left+b.width/2), (a.top+a.height/2)-(b.top+b.height/2)) < (a.width+b.width)/2 + 2));
-    return { missing: false, minTile: Math.min(...sizes), minFont: Math.min(...fonts), overlap,
+    return { missing: false, minimumTile: innerWidth < 360 ? 22 : 24, minTile: Math.min(...sizes), minFont: Math.min(...fonts), overlap,
       wheelMin: Math.min(...[...document.querySelectorAll('.letter')].map(tile => tile.getBoundingClientRect().width)),
       keyboardReachable: viewport.tabIndex === 0, viewportHeight: viewport.clientHeight, guidanceContrast: Math.min(...guidanceContrast),
       overflowX: viewport.scrollWidth > viewport.clientWidth,
@@ -640,21 +648,25 @@ async function expectBoardFullyVisible(page, label) {
       hint: document.querySelector('.board-scroll-hint')?.textContent || ''
     };
   });
-  if (result.missing || result.viewportHeight < 96 || result.minTile < 32 || result.minFont < 18 || result.wheelMin < 44 || result.overlap || result.guidanceContrast < 4.5 || !result.keyboardReachable) {
+  if (result.missing || result.viewportHeight < 96 || result.minTile < result.minimumTile || result.minFont < 18 || result.wheelMin < 44 || result.overlap || result.guidanceContrast < 4.5 || !result.keyboardReachable) {
     throw new Error(`${label} unreadable or inaccessible board: ${JSON.stringify(result)}`);
   }
-  if ((result.overflowX || result.overflowY) && !result.hint.trim()) throw new Error(`${label} missing scroll affordance`);
-  const originalScroll = await page.locator('.board-viewport').evaluate(el => ({left: el.scrollLeft, top: el.scrollTop}));
-  const tiles = page.locator('.board .tile');
-  for (let i = 0; i < await tiles.count(); i++) {
-    await tiles.nth(i).scrollIntoViewIfNeeded();
-    const reachable = await tiles.nth(i).evaluate(tile => {
-      const b=tile.getBoundingClientRect(), v=document.querySelector('.board-viewport').getBoundingClientRect();
-      return b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1;
-    });
-    if (!reachable) throw new Error(`${label} tile ${i} is unreachable`);
-  }
-  await page.locator('.board-viewport').evaluate((el, pos) => el.scrollTo(pos.left, pos.top), originalScroll);
+  if (result.overflowX || result.overflowY) throw new Error(`${label} requires scrolling the puzzle: ${JSON.stringify(result)}`);
+  const clipped = await page.locator('.board .tile').evaluateAll(tiles => {
+    const viewport = document.querySelector('.board-viewport').getBoundingClientRect();
+    return tiles.some(tile => { const b = tile.getBoundingClientRect(); return b.left < viewport.left - 1 || b.right > viewport.right + 1 || b.top < viewport.top - 1 || b.bottom > viewport.bottom + 1; });
+  });
+  if (clipped) throw new Error(`${label} hides tiles outside the board viewport`);
+}
+
+async function expectBoardAndWheelTogether(page, label) {
+  await expectBoardFullyVisible(page, label);
+  const result = await page.evaluate(() => {
+    const selectors = ['.board-viewport', '.wheel', '.actions', '.tools'];
+    const clipped = selectors.filter(selector => {const b = document.querySelector(selector).getBoundingClientRect(); return b.left < -1 || b.top < -1 || b.right > innerWidth + 1 || b.bottom > innerHeight + 1;});
+    return { clipped, pageScroll: document.documentElement.scrollHeight > innerHeight + 1 };
+  });
+  if (result.pageScroll || result.clipped.length) throw new Error(`${label} cannot see board and controls together: ${JSON.stringify(result)}`);
 }
 
 async function expectDailyProgressDisplay(page) {
@@ -809,6 +821,39 @@ try {
     await largeRandomStart.page.keyboard.press('Escape');
     if (await largeRandomStart.page.locator('[data-action="board"]').evaluate(el => el !== document.activeElement)) throw new Error('Expanded board must restore focus');
     await largeRandomStart.context.close();
+    // Issue 14: complete Canopy board and controls must fit at once, including
+    // after clue feedback and during actual mixed swipe/tap level completion.
+    for (const viewport of [{width:360,height:640},{width:390,height:844},{width:320,height:568}]) {
+      const canopy = await freshPage(browser, {viewport,isMobile:true,hasTouch:true}, {levelIndex:4,campaign:{completedLevels:4,bestRun:4,lastCompletedLevelId:4,puzzleOrder:sequentialPuzzleOrder}});
+      const label = `Canopy ${viewport.width}x${viewport.height}`;
+      await expectBoardAndWheelTogether(canopy.page, label);
+      await canopy.page.locator('[data-action="hint"]').click();
+      await canopy.page.locator('#hint-word').selectOption('0');
+      await canopy.page.locator('[data-action="buy-clue"]').click();
+      await expectCoins(canopy.page, 35);
+      await expectBoardAndWheelTogether(canopy.page, `${label} after clue`);
+      await dragWithMouse(canopy.page, 'FOREST');
+      await expectProgress(canopy.page, '1/5');
+      await expectBoardAndWheelTogether(canopy.page, `${label} after swipe`);
+      for (const word of levelFiveTargets.slice(1)) await submitByTap(canopy.page, word);
+      await expectLevelCompleteOverlay(canopy.page, 'Level 5 complete', 'Level 5 complete! Milestone bonus: +35 coins. Next: Level 6.');
+      await canopy.context.close();
+    }
+    // Every shipped campaign shape must fit without panning on a compact phone.
+    const matrix = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true});
+    for (let index=0; index<levels.length; index++) {
+      await matrix.page.evaluate(index => {
+        const save = JSON.parse(localStorage.getItem('word-garden-state'));
+        Object.assign(save, {levelIndex:index,solved:[],bonusFound:[],revealed:[]});
+        Object.assign(save.campaign,{completedLevels:index,bestRun:index,lastCompletedLevelId:index});
+        localStorage.setItem('word-garden-state',JSON.stringify(save));
+      },index);
+      await matrix.page.reload();
+      await matrix.page.waitForSelector('.letter');
+      await matrix.page.evaluate(() => document.fonts.ready);
+      await expectBoardAndWheelTogether(matrix.page, `campaign shape ${index+1}`);
+    }
+    await matrix.context.close();
     const nineLetters = await freshPage(browser, {viewport: {width:360,height:640}, isMobile:true, hasTouch:true}, {levelIndex:35, campaign:{completedLevels:35,bestRun:35,lastCompletedLevelId:35,puzzleOrder:sequentialPuzzleOrder}});
     await expectViewportFit(nineLetters.page, 'nine-letter compact phone');
     await expectBoardFullyVisible(nineLetters.page, 'nine-letter compact phone');

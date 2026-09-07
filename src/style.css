@@ -1159,7 +1159,7 @@ button:focus-visible, select:focus-visible { outline: 3px solid #2f7a54; outline
 .expanded-board .tile { width: 36px; height: 36px; font-size: 19px; }
 .expanded-board .slot-number { font-size: 8px; }
 
-/* A readable grid is more useful than squeezing every cell into a phone. */
+/* Readable puzzle cells and the optional enlarged view. */
 .board-wrap { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 5px; place-items: stretch; padding: 0; overflow: hidden; }
 .level-card { position: static; min-width: 0; color: #18342c; }
 .level-card p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1201,3 +1201,71 @@ body[data-page-scroll="true"] { overflow-y: auto; }
 
 /* Typing must not move the letter wheel underneath an active gesture. */
 .current-word, .current-word.has-word { height: 40px; min-height: 40px; line-height: 1; }
+
+/* Balance the complete crossword with a stable, thumb-sized word wheel. */
+:root { --shell-pad-x: 6px; --shell-pad-y: 5px; --shell-gap: 4px; --tile-gap: 2px; --letter-size: 44px; }
+.shell { grid-template-rows: 36px 34px minmax(0, 1fr) auto 34px; }
+.topbar { gap: 7px; }
+.topbar > div:first-child { flex: 1; }
+.topbar h1 { font-size: clamp(18px, 4.7vw, 24px); }
+.topbar .eyebrow { margin: 0 0 2px; font-size: 9px; line-height: 1; }
+.coin-pill { min-width: 46px; padding: 6px 8px; font-size: 14px; box-shadow: none; }
+.mode-tabs { gap: 0; padding: 2px; border-radius: 12px; box-shadow: none; }
+.mode-tabs button { min-height: 28px; padding: 5px 9px; font-size: 11px; }
+.journey-peek { display: grid; grid-template-columns: 1.25fr 1fr; gap: 5px; min-width: 0; }
+.compact-progress { min-width: 0; min-height: 0; height: 100%; gap: 5px; padding: 4px 7px; font-size: 10px; box-shadow: none; }
+.compact-progress > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-progress .campaign-meter { display: none; }
+.compact-progress > span:last-child { margin-left: auto; white-space: nowrap; }
+.garden-peek { min-height: 0; height: 100%; gap: 5px; padding-right: 6px; box-shadow: none; }
+.garden-peek .garden-scene { width: 32%; height: 100%; min-height: 0; }
+.garden-peek strong { font-size: 10px; }
+.garden-peek small { font-size: 9px; margin-top: 1px; white-space: nowrap; }
+.board-wrap { grid-template-rows: 26px minmax(0, 1fr); gap: 2px; }
+.board-viewport { overflow: hidden; touch-action: auto; }
+.board { padding: 4px; }
+.board .tile { box-shadow: 0 1px 0 #9caf92; }
+.board .slot-number { font-size: 8px; }
+.board-scroll-hint { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.composer { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: 'word word word' 'tools wheel actions'; gap: 3px 5px; align-items: center; }
+.current-word, .current-word.has-word { grid-area: word; height: 26px; min-height: 26px; font-size: 16px; width: 100%; }
+.current-word:not(.has-word) { font-size: 11px; letter-spacing: .04em; }
+.wheel { grid-area: wheel; width: 158px; max-width: none; box-shadow: inset 0 0 0 5px #ffffff50, 0 5px 16px #09211e20; }
+.letter { font-size: 21px; box-shadow: inset 0 -2px 0 #18342c1f, 0 3px 8px #18342c1f; }
+.actions, .tools { grid-template-columns: 1fr; gap: 5px; }
+.actions { grid-area: actions; }
+.tools { grid-area: tools; }
+.actions button, .tools button { width: 100%; min-height: 44px; padding: 4px 2px; font-size: 11px; border-radius: 12px; box-shadow: inset 0 -2px 0 #18342c1f; }
+.tools small { display: block; font-size: 9px; line-height: 1.15; margin-top: 2px; }
+.ledger { min-height: 0; padding: 3px 79px 3px 7px; border-radius: 10px; align-content: center; box-shadow: none; }
+.ledger > div { display: none; }
+.ledger p { font-size: 11px; min-height: 0; line-height: 1.15; }
+.tester-feedback__cta { min-width: 68px; min-height: 26px; padding: 4px; font-size: 10px; right: 4px; }
+@media (min-height: 760px) {
+  :root { --shell-pad-y: 8px; --shell-gap: 6px; }
+  .shell { grid-template-rows: 42px 40px minmax(0, 1fr) auto 42px; }
+  .current-word, .current-word.has-word { height: 32px; min-height: 32px; font-size: 20px; }
+  .garden-peek strong { font-size: 12px; }
+  .garden-peek small, .compact-progress { font-size: 11px; }
+  .ledger p { font-size: 12px; }
+  .tester-feedback__cta { min-height: 32px; }
+}
+@media (max-width: 349px) {
+  :root { --shell-pad-x: 4px; --tile-gap: 1px; }
+  .topbar { gap: 4px; }
+  .topbar h1 { font-size: 17px; }
+  .mode-tabs button { padding-inline: 7px; }
+  .composer { column-gap: 3px; }
+  .tools button, .actions button { font-size: 10px; }
+  .board .slot-number { font-size: 7px; }
+}
+/* The rare tall crossword trades the wheel's decoration for its word preview. */
+.shell[data-compact-board="true"] { gap: 3px; }
+.shell[data-compact-board="true"] .composer { position: relative; grid-template-areas: 'tools wheel actions'; }
+.shell[data-compact-board="true"] .current-word { position: absolute; left: 50%; top: 50%; translate: -50% -50%; grid-area: auto; z-index: 4; width: 94px; height: 40px; min-height: 40px; background: #f4f6e9; font-size: 14px; pointer-events: none; }
+.shell[data-compact-board="true"] .current-word:not(.has-word) { width: 76px; font-size: 9px; line-height: 1.25; }
+.shell[data-compact-board="true"] .wheel-center { visibility: hidden; }
+/* Feedback uses the existing message line instead of adding a second badge. */
+.ledger[data-tone="bonus"], .ledger[data-tone="complete"] { background: #fff0bf; }
+.ledger[data-tone="invalid"], .ledger[data-tone="blocked"] { background: #ffeadb; }
+.ledger[data-tone="target"], .ledger[data-tone="hint"] { background: #edf6df; }
