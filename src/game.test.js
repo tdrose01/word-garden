@@ -266,7 +266,7 @@ test('campaign completion advances through the deeper path and updates snapshot 
   assert.equal(snapshot.campaignStats.currentLevel, 6);
   assert.equal(snapshot.campaignStats.totalLevels, levels.length);
   assert.equal(snapshot.campaignStats.completedLevels, 5);
-  assert.equal(snapshot.campaignStats.pathPercent, 14);
+  assert.equal(snapshot.campaignStats.pathPercent, Math.round(5 / levels.length * 100));
   assert.equal(snapshot.campaignStats.pack.title, 'Moss Trail');
   assert.equal(snapshot.campaignStats.pack.current, 1);
   assert.equal(snapshot.campaignStats.nextReward, 10);
@@ -336,7 +336,7 @@ test('campaign stats report pack progress and path loops from level index', () =
 
   assert.equal(snapshot.campaignStats.pathLoop, 2);
   assert.equal(snapshot.campaignStats.currentLevel, 7);
-  assert.equal(snapshot.campaignStats.pathPercent, 17);
+  assert.equal(snapshot.campaignStats.pathPercent, 100);
   assert.equal(snapshot.campaignStats.pack.title, 'Moss Trail');
   assert.equal(snapshot.campaignStats.pack.current, 2);
   assert.equal(snapshot.campaignStats.pack.total, 5);

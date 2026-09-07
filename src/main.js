@@ -4,7 +4,13 @@ import '@fontsource/nunito/latin-900.css';
 import '@fontsource/fraunces/latin-700.css';
 import './style.css';
 import { getLevelTheme } from './themes.js';
+import { botanicalScenery, plantArt } from './botanical.js';
+import { playGardenTone } from './sensory.js';
 import {
+  plantSeed,
+  updateSettings,
+  startReplay,
+  exitReplay,
   createSnapshot,
   getLevel,
   getProgress,
@@ -40,6 +46,10 @@ let swipePointer = null;
 let feedback = null;
 let previousCoins = state.coins;
 let panel = null;
+let boardResizeObserver;
+let selectedPlant = null;
+let gardenNotice = '';
+let rewardInFlight = false;
 let hintTarget = null;
 let hintCell = null;
 let panelReturnFocus = 'hint';
@@ -53,7 +63,7 @@ function render() {
   for (const [name, value] of Object.entries(theme.colors)) document.body.style.setProperty(`--scene-${name}`, value);
   const boardKey = `${state.mode}:${snapshot.level.id}:${snapshot.progress.dateKey || ''}:${state.levelIndex}`;
   const progress = getProgress(state);
-  const levelLabel = state.mode === 'daily' ? 'Daily' : `Level ${snapshot.campaignStats.currentLevel}`;
+  const levelLabel = state.mode === 'replay' ? 'Replay' : state.mode === 'daily' ? 'Daily' : `Level ${snapshot.campaignStats.currentLevel}`;
   const maxX = Math.max(...snapshot.cells.map((cell) => cell.x));
   const maxY = Math.max(...snapshot.cells.map((cell) => cell.y));
   const currentWord = selection.map((item) => item.letter).join('');
@@ -61,6 +71,7 @@ function render() {
 
   app.innerHTML = `
     ${renderLevelScenery(theme)}
+    ${rewardInFlight ? '<span class="garden-reward-flight" aria-hidden="true">✦</span>' : ''}
     <section class="topbar" aria-label="Game status">
       <div>
         <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>${levelLabel}</p>
@@ -159,24 +170,16 @@ function render() {
   bindGamePanel();
   updateSwipeGuide();
   fitBoard();
+  requestAnimationFrame(fitBoard);
+  boardResizeObserver?.disconnect();
+  boardResizeObserver = new ResizeObserver(() => requestAnimationFrame(fitBoard));
+  boardResizeObserver.observe(app.querySelector('.board-viewport'));
   previousCoins = state.coins;
 }
 
 
 function renderLevelScenery(theme) {
-  const { sky, mist, ground, foliage, accent } = theme.colors;
-  const hills = `<path d="M0 650Q150 500 310 650T600 600V900H0Z" fill="${mist}"/><path d="M0 820Q150 650 330 780T600 720V900H0Z" fill="${ground}"/>`;
-  let scene = '';
-  if (theme.scene === 'brook') scene = `<path d="M340 520C40 670 550 660 190 900" fill="none" stroke="${accent}" stroke-width="110"/><path d="M340 520C40 670 550 660 190 900" fill="none" stroke="${sky}" stroke-width="3" stroke-dasharray="40 50"/><ellipse cx="100" cy="790" rx="42" ry="20" fill="${foliage}"/><ellipse cx="450" cy="670" rx="26" ry="14" fill="${foliage}"/>`;
-  if (theme.scene === 'woodland') scene = [30,140,440,560].map((x,i)=>`<path d="M${x} 880V${380+i*38}" stroke="${ground}" stroke-width="16"/><ellipse cx="${x}" cy="${440+i*38}" rx="70" ry="150" fill="${foliage}"/><path d="M${x} ${440+i*38}V850" stroke="${ground}" stroke-width="5"/>`).join('');
-  if (theme.scene === 'flowers') scene = [50,160,450,555].map((x,i)=>`<g transform="translate(${x},${690+i%2*70})"><path d="M0 170V0M0 95L-40 60" stroke="${foliage}" stroke-width="8"/><g fill="${accent}"><circle cx="-24" r="28"/><circle cx="24" r="28"/><circle cy="-24" r="28"/><circle cy="24" r="28"/></g><circle r="15" fill="${sky}"/></g>`).join('');
-  if (theme.scene === 'sunrise') scene = `<circle cx="460" cy="360" r="85" fill="${accent}"/><g stroke="${accent}" stroke-width="6" stroke-linecap="round"><path d="M460 225V200M460 495V520M325 360H300M570 360H595M362 262L340 240M555 265L575 245"/></g><path d="M0 780Q200 600 360 720T600 690V900H0Z" fill="${ground}"/>`;
-  if (theme.scene === 'canyon') scene = `<path d="M0 500H110L150 690H190L220 900H0ZM600 430H520L475 590H445L400 900H600Z" fill="${accent}"/><path d="M0 630H135M0 690H150M600 570H486M600 680H430" stroke="${ground}" stroke-width="12"/>`;
-  if (theme.scene === 'moonlight') scene = `<circle cx="480" cy="200" r="56" fill="${accent}"/><circle cx="500" cy="184" r="48" fill="${sky}"/>${[[80,170],[150,330],[420,400],[540,80],[65,510]].map(([x,y])=>`<path d="M${x-7} ${y}H${x+7}M${x} ${y-7}V${y+7}" stroke="${accent}" stroke-width="3"/>`).join('')}`;
-  if (theme.scene === 'alpine') scene = `<path d="M-100 900L100 380L320 900M260 900L490 300L750 900" fill="${foliage}"/><path d="M62 478L100 380L142 480L107 462L90 485ZM448 410L490 300L538 410L505 390L476 420Z" fill="${sky}"/>`;
-  if (theme.scene === 'harvest') scene = [30,80,150,460,530,590].map((x,i)=>`<g transform="translate(${x},${650+i%2*55})"><path d="M0 230V0" stroke="${foliage}" stroke-width="5"/>${[10,35,60,85].map(y=>`<ellipse cx="-10" cy="${y}" rx="9" ry="17" transform="rotate(-35 -10 ${y})" fill="${accent}"/><ellipse cx="10" cy="${y+12}" rx="9" ry="17" transform="rotate(35 10 ${y+12})" fill="${accent}"/>`).join('')}</g>`).join('');
-  if (theme.scene === 'seedlings') scene = [65,185,460,565].map((x,i)=>`<g transform="translate(${x},${740+i%2*60})"><path d="M0 150V0" stroke="${foliage}" stroke-width="7"/><path d="M0 35Q-80-30-65 35Q-40 75 0 50M0 0Q80-70 65 0Q40 40 0 20" fill="${foliage}"/></g>`).join('');
-  return `<svg class="level-scenery" data-scene="${theme.scene}" viewBox="0 0 600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="600" height="900" fill="${sky}"/>${hills}${scene}</svg>`;
+  return botanicalScenery(theme);
 }
 
 function renderSlotNumber(snapshot, cell) {
@@ -188,40 +191,48 @@ function renderCompactProgress(snapshot) {
   const stats = snapshot.campaignStats;
   const percent = state.mode === 'daily' ? Math.round(snapshot.progress.solved.length / snapshot.level.targets.length * 100) : stats.pathPercent;
   return `<button class="compact-progress" data-action="progress" aria-label="View detailed progress">
-    <span>${state.mode === 'daily' ? `Daily · ${snapshot.dailyStats.streak} day streak` : `${stats.pack.title} · ${stats.currentLevel}/${stats.totalLevels}`}</span>
+    <span>${state.mode === 'daily' ? `Daily · ${snapshot.dailyStats.streak}d · bonus ${Math.min(snapshot.dailyObjective?.found || 0, snapshot.dailyObjective?.goal || 3)}/${snapshot.dailyObjective?.goal || 3}` : `${stats.pack.title} · ${stats.currentLevel}/${stats.totalLevels}`}</span>
     <span class="campaign-meter"><span style="width:${percent}%"></span></span><span>${percent}% <span aria-hidden="true">›</span></span>
   </button>`;
 }
 
 function renderGardenScene(stats = {}) {
-  const flowers = Math.min(stats.flowers || 0, 24);
-  const trees = Math.min(stats.trees || 0, 4);
-  const butterflies = Math.min(stats.butterflies || 0, 4);
-  const area = (stats.completedPacks || 0) % 4;
-  const sky = ['#e4efdb', '#c9e8dc', '#ddd8ed', '#f3dfc0'][area];
-  return `<svg class="garden-scene" viewBox="0 0 360 110" aria-hidden="true">
-    <rect width="360" height="110" rx="12" fill="${sky}"/>
-    <circle cx="300" cy="24" r="14" fill="#f3c75d"/>
-    <path d="M0 86 Q90 60 180 84 T360 76 V110 H0Z" fill="#96ba7b"/>
-    ${stats.completedPacks ? '<path d="M156 110 Q220 74 183 63" fill="none" stroke="#edcf99" stroke-width="14"/><path d="M8 76H352" stroke="#fff4da" stroke-width="3" stroke-dasharray="5 11"/>' : ''}
-    ${Array.from({length:trees}, (_,i) => `<g transform="translate(${28+i*93},12)"><path d="M0 70V29" stroke="#896445" stroke-width="6"/><circle cy="24" r="20" fill="#447b54"/><circle cx="-11" cy="35" r="14" fill="#538b5b"/><circle cx="12" cy="35" r="15" fill="#629562"/></g>`).join('')}
-    ${Array.from({length:flowers}, (_,i) => {const x=14+(i*47)%334,y=81+(i%3)*8;return `<g class="garden-flower" transform="translate(${x},${y})"><path d="M0 15V0M0 10L-5 6" stroke="#396848" stroke-width="2"/><g fill="${['#d56e66','#f6ce70','#a580bd'][i%3]}"><circle cx="-4" r="4"/><circle cx="4" r="4"/><circle cy="-4" r="4"/><circle cy="4" r="4"/></g><circle r="2.5" fill="#fff1b8"/></g>`;}).join('')}
-    ${Array.from({length:butterflies},(_,i)=>`<g transform="translate(${82+i*63},${26+(i%2)*17})"><path d="M0 0C-18-15-17 12 0 5C17 12 18-15 0 0" fill="#c4779e"/><path d="M0-2V8" stroke="#604650" stroke-width="2"/></g>`).join('')}
-    ${Array.from({length: Math.min(stats.completedPacks || 0, 8)}, (_,i) => `<rect x="${6+i*44}" y="102" width="32" height="4" rx="2" fill="#f4e2b5"/>`).join('')}
-    ${!flowers ? '<path d="M180 98V82M180 88Q160 74 167 89Q173 94 180 92M180 85Q197 67 193 84Q188 91 180 89" fill="#447b54" stroke="#447b54" stroke-width="2"/>' : ''}
-  </svg>`;
+  const planted = (stats.plots || []).filter(plot => plot.plantId);
+  return `<svg class="garden-scene" viewBox="0 0 360 130" aria-hidden="true"><rect width="360" height="130" rx="14" fill="#e1ebd3"/><circle cx="306" cy="24" r="17" fill="#f4d78b"/><path d="M0 85Q86 47 187 78T360 65V130H0Z" fill="#b1c79a"/><path d="M155 130Q206 98 173 70" fill="none" stroke="#ecdcba" stroke-width="25"/>
+    ${[0,1,2].map(i=>`<g transform="translate(${18+i*140} 7) scale(.6)"><path d="M0 128V48" stroke="#7c7351" stroke-width="8"/><path d="M-30 75Q-54 40-20 31Q-13-11 17 21Q54 12 41 53Q51 91 5 85Z" fill="#6c956c"/><path d="M0 52L-13 37M0 65L20 43" stroke="#b4c590" stroke-width="2"/></g>`).join('')}
+    ${(planted.length ? planted : [{plantId:'daisy',color:'#dda889',stage:'seedling'}]).slice(0,8).map((plot,i)=>`<g class="garden-flower" transform="translate(${12+i*42} ${39+(i%2)*12}) scale(.7)">${plantArt(plot,plot.stage)}</g>`).join('')}</svg>`;
+}
+
+function renderGardenWorkbench(stats) {
+  const plants = stats.plants || [];
+  if (!plants.some(plant => plant.id === selectedPlant)) selectedPlant = plants[0]?.id;
+  return `${renderGardenScene(stats)}<div class="garden-summary"><span><strong>${stats.seedCredits || 0}</strong> seeds to plant</span><span><strong>${stats.unlockedAreas || 1}</strong> garden areas</span></div>
+    <p class="panel-note">Choose a plant, then an empty plot. Complete puzzles to earn seeds and grow your plants.</p>
+    <div class="plant-palette" role="group" aria-label="Choose a plant">${plants.map(plant=>`<button data-plant="${escapeAttribute(plant.id)}" aria-pressed="${selectedPlant === plant.id}"><svg viewBox="0 0 80 95" aria-hidden="true">${plantArt(plant)}</svg><span>${escapeAttribute(plant.name)}</span></button>`).join('')}</div>
+    <div class="garden-plots" role="group" aria-label="Your garden plots">${(stats.plots || []).map(plot=>`<button class="garden-plot ${plot.plantId ? 'is-planted' : ''}" data-plot="${plot.index}" ${plot.plantId || !(stats.seedCredits > 0) ? 'disabled' : ''} aria-label="Plot ${plot.index+1}: ${plot.plantId ? escapeAttribute(plot.name)+' '+plot.stage : 'empty, plant selected seed'}"><svg viewBox="0 0 80 95" aria-hidden="true">${plot.plantId ? plantArt(plot,plot.stage) : '<ellipse cx="40" cy="73" rx="27" ry="9" fill="#ae9474"/><path d="M40 33V53M30 43H50" stroke="#5e7855" stroke-width="3" stroke-linecap="round"/>'}</svg><strong>${plot.plantId ? escapeAttribute(plot.name) : 'Plant here'}</strong><small>${plot.plantId ? plot.stage : 'Plot '+(plot.index+1)}</small></button>`).join('')}</div>
+    <p class="garden-notice" role="status">${escapeAttribute(gardenNotice || (stats.nextPlotAt ? 'More plots open as you complete puzzles. Next expansion at '+stats.nextPlotAt+' completions.' : 'Your garden has room to flourish.'))}</p>`;
+}
+
+function renderObjectives(snapshot) {
+  const objective = snapshot.dailyObjective;
+  if (!objective) return '';
+  return `<section class="daily-objective" aria-label="Daily objective"><span class="eyebrow">A little extra today</span><h3>Find ${objective.goal} bonus words</h3><p>${objective.found}/${objective.goal} found · ${objective.claimed ? 'Reward collected' : '+'+objective.reward+' coins'}</p><progress value="${Math.min(objective.found,objective.goal)}" max="${objective.goal}" aria-label="Daily bonus-word objective"></progress></section>`;
+}
+
+function renderLevelMap(snapshot) {
+  return `<section class="level-map" aria-label="Level map"><h3>Your garden path</h3><p class="panel-note">Revisit a cleared puzzle for a relaxed practice round. Replays keep your coins, seeds and campaign progress safe.</p>${state.mode === 'replay' ? '<button data-action="exit-replay">Return to current level</button>' : ''}<div class="level-map__list">${(snapshot.levelMap || []).map(level=>`<button data-replay="${level.levelIndex}" ${!level.completed ? 'disabled' : ''} aria-label="${level.completed ? 'Replay' : level.current ? 'Current' : 'Locked'} level ${level.levelIndex+1}, ${escapeAttribute(level.title)}"><span>${level.levelIndex+1}</span><strong>${escapeAttribute(level.title)}</strong><small>${level.completed ? 'Replay ↗' : level.current ? 'You are here' : 'Locked'}</small></button>`).join('')}</div></section>`;
 }
 
 function renderGarden(stats = {}) {
   return `<button class="garden-peek" data-garden-growth="${stats.totalCompletions || 0}" data-action="garden" aria-label="Open your garden, ${stats.flowers || 0} flowers">
-    ${renderGardenScene(stats)}<span><strong>Your garden</strong><small>${stats.flowers || 0} flowers · ${stats.trees || 0} trees <span aria-hidden="true">›</span></small></span>
+    ${renderGardenScene(stats)}<span><strong>Your garden</strong><small>${stats.seedCredits || 0} seeds · ${(stats.plots || []).filter(plot => plot.plantId).length} planted <span aria-hidden="true">›</span></small></span>
   </button>`;
 }
 
 function renderGamePanel(snapshot) {
   if (!panel) return '';
   let title = 'Settings';
-  let content = '<p>Your progress is saved automatically on this device.</p><button data-action="reset">Reset progress…</button>';
+  let content = `<p>Your progress is saved automatically on this device.</p><div class="settings-list"><button data-setting="sound" role="switch" aria-checked="${Boolean(snapshot.settings?.sound)}"><span><strong>Garden sounds</strong><small>Soft letter tones and a completion melody</small></span><b>${snapshot.settings?.sound ? 'On' : 'Off'}</b></button><button data-setting="haptics" role="switch" aria-checked="${snapshot.settings?.haptics !== false}"><span><strong>Touch feedback</strong><small>Gentle vibration on supported devices</small></span><b>${snapshot.settings?.haptics !== false ? 'On' : 'Off'}</b></button></div><p class="panel-note">Animations follow your device’s reduced-motion preference.</p><button data-action="reset">Reset progress…</button>`;
   if (panel === 'confirm-reset') {
     title = 'Reset your garden?';
     content = '<p>This clears your levels, coins, daily streaks and garden on this device.</p><button data-action="confirm-reset" class="danger">Yes, reset all progress</button>';
@@ -234,18 +245,18 @@ function renderGamePanel(snapshot) {
   }
   if (panel === 'progress') {
     title = 'Your progress';
-    content = state.mode === 'daily' ? renderDailyStats(snapshot) : renderCampaignStats(snapshot);
+    content = `${state.mode === 'daily' ? renderDailyStats(snapshot) : renderCampaignStats(snapshot)}${renderObjectives(snapshot)}${renderLevelMap(snapshot)}`;
   }
   if (panel === 'garden') {
     title = 'Your growing garden';
     const stats = snapshot.gardenStats || {};
-    content = `${renderGardenScene(stats)}<p>${stats.flowers || 0} flowers · ${stats.trees || 0} trees · ${stats.butterflies || 0} butterflies</p><p>${stats.completedPacks || 0} garden areas complete</p><p>Every completed puzzle plants a flower. Five completions grow a tree; ten welcome a butterfly. Finish a pack to transform your garden.</p>${stats.nextUnlock ? `<p>${stats.nextUnlock.remaining} puzzles until ${escapeAttribute(stats.nextUnlock.label)}.</p>` : ''}`;
+    content = renderGardenWorkbench(stats);
   }
   if (panel === 'hint') {
     title = 'A little help';
     const options = snapshot.hintOptions || { words: [], cells: [] };
-    const free = options.freeRescueAvailable && state.coins < 5;
-    content = `<p>${state.coins} coins${free ? ' · One free rescue available on this puzzle' : ''}</p>
+    const free = state.mode === 'replay' || (options.freeRescueAvailable && state.coins < 5);
+    content = `<p>${state.coins} coins${state.mode === 'replay' ? ' · Replay hints are free' : free ? ' · One free rescue available on this puzzle' : ''}</p>
       <label for="hint-word">Choose a word for a letter clue</label>
       <select id="hint-word"><option value="">Choose a word…</option>${options.words.filter(word => word.available).map(word => `<option value="${word.targetIndex}" ${hintTarget === word.targetIndex ? 'selected' : ''}>${escapeAttribute(word.label)} ${word.direction} (row ${word.row}, col ${word.col}) · ${escapeAttribute(word.pattern || '')}</option>`).join('')}</select>
       <p class="panel-note">Reveals its next hidden letter. The small board numbers identify each word.</p>
@@ -265,6 +276,30 @@ function closeGamePanel() {
 }
 
 function bindGamePanel() {
+  app.querySelectorAll('[data-setting]').forEach(button => button.addEventListener('click', () => {
+    const key = button.dataset.setting;
+    const settings = createSnapshot(state).settings || {};
+    state = updateSettings(state, { [key]: key === 'haptics' ? settings.haptics === false : !settings.sound });
+    saveState(state);
+    if (key === 'sound') playGardenTone('target', createSnapshot(state).settings);
+    render();
+    app.querySelector(`[data-setting="${key}"]`)?.focus();
+  }));
+  app.querySelectorAll('[data-plant]').forEach(button => button.addEventListener('click', () => {
+    selectedPlant = button.dataset.plant; gardenNotice = ''; render();
+    app.querySelector(`[data-plant="${selectedPlant}"]`)?.focus();
+  }));
+  app.querySelectorAll('[data-plot]').forEach(button => button.addEventListener('click', () => {
+    const result = plantSeed(state, { plotIndex: Number(button.dataset.plot), plantId: selectedPlant });
+    state = result.state; gardenNotice = result.message; saveState(state); pulse(result.status); render();
+    app.querySelector('[data-plant][aria-pressed="true"]')?.focus();
+  }));
+  app.querySelectorAll('[data-replay]').forEach(button => button.addEventListener('click', () => {
+    const result = startReplay(state, Number(button.dataset.replay));
+    state = result.state; message = result.message; panel = null; completion = null;
+    wheelLetters = getLevel(state).letters; selection = []; saveState(state); render();
+    app.querySelector('.letter')?.focus();
+  }));
   const dialog = app.querySelector('.game-panel');
   if (!dialog) return;
   dialog.showModal();
@@ -621,6 +656,7 @@ function renderLevelComplete(details) {
           </div>
         </div>
         <button class="primary" data-action="continue">Continue</button>
+        ${state.mode !== 'replay' ? '<button data-action="visit-garden">Plant your seed</button>' : '<button data-action="exit-replay">Return to current level</button>'}
       </div>
     </section>
   `;
@@ -666,7 +702,11 @@ function bindEvents() {
     const modal = app.querySelector('.level-complete');
     [...app.children].forEach(child => { if (child !== modal) child.inert = true; });
     modal.addEventListener('keydown', event => {
-      if (event.key === 'Tab') { event.preventDefault(); modal.querySelector('[data-action="continue"]').focus(); }
+      if (event.key === 'Tab') {
+        const buttons = [...modal.querySelectorAll('button')];
+        if (event.shiftKey && document.activeElement === buttons[0]) { event.preventDefault(); buttons.at(-1).focus(); }
+        else if (!event.shiftKey && document.activeElement === buttons.at(-1)) { event.preventDefault(); buttons[0].focus(); }
+      }
     });
     window.setTimeout(() => app.querySelector('.level-complete [data-action="continue"]')?.focus(), 0);
   }
@@ -682,6 +722,7 @@ function selectLetter(index) {
     return false;
   }
   selection.push({ index, letter: wheelLetters[index] });
+  playGardenTone('letter', state.settings, selection.length - 1);
   updateSelectionView();
   return true;
 }
@@ -888,6 +929,13 @@ function endSwipe() {
 
 function handleAction(action) {
   if (refreshDaily()) return;
+  if (action === 'visit-garden') {
+    completion = null; rewardInFlight = false; panel = 'garden'; panelReturnFocus = 'garden'; render();
+  }
+  if (action === 'exit-replay') {
+    state = exitReplay(state); panel = null; completion = null; selection = [];
+    wheelLetters = getLevel(state).letters; message = 'Back to your garden path.'; saveState(state); render();
+  }
   if (action === 'submit') {
     handleSubmit();
   }
@@ -950,6 +998,7 @@ function handleAction(action) {
   }
   if (action === 'continue') {
     completion = null;
+    if (rewardInFlight) window.setTimeout(() => { rewardInFlight = false; app.querySelector('.garden-reward-flight')?.remove(); }, 1000);
     feedback = null;
     pulse('light');
     render();
@@ -974,6 +1023,7 @@ function handleSubmit() {
 
   if (result.status === 'level-complete') {
     completion = createCompletionDetails(beforeSnapshot, createSnapshot(state), result.message);
+    rewardInFlight = state.mode !== 'replay';
   } else {
     completion = null;
   }
@@ -1009,7 +1059,9 @@ function createFeedback(result, word = '') {
 }
 
 function pulse(kind) {
-  if (!navigator.vibrate) {
+  const settings = state.settings || {};
+  playGardenTone(kind, settings);
+  if (settings.haptics === false || !navigator.vibrate) {
     return;
   }
 
@@ -1031,7 +1083,8 @@ function pulse(kind) {
 function createCompletionDetails(beforeSnapshot, afterSnapshot, resultMessage) {
   const before = beforeSnapshot.gardenStats;
   const after = afterSnapshot.gardenStats;
-  const growth = after?.completedPacks > before?.completedPacks ? 'A garden area is complete! Your garden has a new look.' : after?.butterflies > before?.butterflies ? 'A new flower bloomed and a butterfly arrived!' : after?.trees > before?.trees ? 'A new flower bloomed and a tree took root!' : 'A new flower bloomed in your garden!';
+  const growth = after?.unlockedPlots > before?.unlockedPlots ? 'A new seed is ready, and more garden plots have opened!' : 'A seed is ready to plant. Your garden is growing!';
+  if (state.mode === 'replay') return { growth: 'A little practice, just for you. Your garden progress is safe.', context: 'Garden replay', title: 'Replay complete', message: resultMessage, cleared: beforeSnapshot.level.title, reward: '0', next: 'Your choice' };
   if (state.mode === 'daily') {
     return {
       growth,
@@ -1076,3 +1129,4 @@ render();
 
 // Recalculate after web fonts settle so compact screens keep usable board space.
 document.fonts.ready.then(() => fitBoard());
+document.fonts.addEventListener('loadingdone', fitBoard);

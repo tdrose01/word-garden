@@ -62,13 +62,13 @@ const SEEDS = {
 // remains metadata for designers; UI must never render sourceWord as a clue.
 const SCENE_COPY = {
   seedlings: ['Fresh beginnings', 'Young leaves and softly tended beds.'],
-  brook: ['Beside the water', 'Cool ripples pass rounded rocks and leafy banks.'],
+  brook: ['Beside the water', 'Cool water passes rounded rocks and leafy banks.'],
   woodland: ['Under the canopy', 'Layered boughs shelter a quiet winding path.'],
-  flowers: ['Soft color', 'Delicate blossoms brighten a leafy clearing.'],
-  sunrise: ['First light', 'Warm golden light spreads across the horizon.'],
+  flowers: ['Soft color', 'Soft hues brighten a leafy clearing.'],
+  sunrise: ['First light', 'Warm light spreads across the horizon.'],
   canyon: ['Sunlit cliffs', 'Warm rock layers rise above a quiet valley.'],
-  moonlight: ['Silver evening', 'A gentle silver glow settles over the landscape.'],
-  alpine: ['Cool horizons', 'Pale peaks rise into clear, crisp air.'],
+  moonlight: ['Quiet evening', 'A gentle lunar glow settles over the landscape.'],
+  alpine: ['Cool horizons', 'Pale mountains rise into clear, crisp air.'],
   harvest: ['Golden season', 'Warm leaves and golden fields signal a changing season.']
 };
 
@@ -81,6 +81,10 @@ export function getLevelTheme(level) {
     ? level.targets.find(word => typeof word === 'string' && Object.hasOwn(SEEDS, word.toUpperCase()))?.toUpperCase()
     : undefined;
   const sourceWord = Object.hasOwn(SEEDS, letters) ? letters : targetSeed;
+  if (Object.hasOwn(PALETTES, level?.scene)) {
+    const [title, description] = SCENE_COPY[level.scene];
+    return { id: letters.toLowerCase() || level.scene, title, description, sourceWord: letters, scene: level.scene, colors: { ...PALETTES[level.scene] } };
+  }
   if (!sourceWord) {
     return {
       id: 'garden', title: 'Quiet garden', description: 'A quiet garden for a little wordplay.',

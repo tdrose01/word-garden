@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { levels, getDailyLevel } from '../src/levels.js';
+import { levels, getDailyLevel, dailyLevels, LEVEL_VERSION } from '../src/levels.js';
 import { getLevelTheme } from '../src/themes.js';
 import { resolveSmokeBrowser, resolveSmokeTarget } from './smoke-target.js';
 
@@ -844,14 +844,27 @@ try {
     for (let index=0; index<levels.length; index++) {
       await matrix.page.evaluate(index => {
         const save = JSON.parse(localStorage.getItem('word-garden-state'));
-        Object.assign(save, {levelIndex:index,solved:[],bonusFound:[],revealed:[]});
-        Object.assign(save.campaign,{completedLevels:index,bestRun:index,lastCompletedLevelId:index});
+        Object.assign(save, {campaignLevelVersion:3,levelIndex:index,solved:[],bonusFound:[],revealed:[]});
+        Object.assign(save.campaign,{cursor:index,completedLevels:index,bestRun:index,lastCompletedLevelId:index});
         localStorage.setItem('word-garden-state',JSON.stringify(save));
       },index);
       await matrix.page.reload();
       await matrix.page.waitForSelector('.letter');
       await matrix.page.evaluate(() => document.fonts.ready);
+      if (sortedLetters(await wheelLetters(matrix.page)) !== sortedLetters(levels[index].letters)) throw new Error(`Campaign matrix loaded the wrong puzzle at ${index+1}`);
       await expectBoardAndWheelTogether(matrix.page, `campaign shape ${index+1}`);
+    }
+    const dailyEpoch = Date.parse('2030-01-01T12:00:00Z');
+    await matrix.page.clock.install({time:new Date(dailyEpoch)});
+    for(let index=0;index<dailyLevels.length;index++) {
+      const date=new Date(dailyEpoch+index*86400000);
+      await matrix.page.clock.setFixedTime(date);
+      await matrix.page.evaluate(() => {const save=JSON.parse(localStorage.getItem('word-garden-state'));save.mode='daily';delete save.daily;localStorage.setItem('word-garden-state',JSON.stringify(save));});
+      await matrix.page.reload();
+      await matrix.page.waitForSelector('.letter');
+      await matrix.page.evaluate(() => document.fonts.ready);
+      if(sortedLetters(await wheelLetters(matrix.page))!==sortedLetters(getDailyLevel(date).letters)) throw new Error(`Daily matrix loaded wrong puzzle ${index}`);
+      await expectBoardAndWheelTogether(matrix.page,`daily shape ${index+1}`);
     }
     await matrix.context.close();
     const nineLetters = await freshPage(browser, {viewport: {width:360,height:640}, isMobile:true, hasTouch:true}, {levelIndex:35, campaign:{completedLevels:35,bestRun:35,lastCompletedLevelId:35,puzzleOrder:sequentialPuzzleOrder}});
@@ -1004,6 +1017,54 @@ try {
     await expectLevelCompleteOverlay(mobileCompletion.page, 'Level 1 complete', 'Level 1 complete! +10 coins. Next: Level 2.');
     await expectCampaignJourney(mobileCompletion.page, 1);
     await mobileCompletion.context.close();
+
+    // Living garden: exercise persistent plant choice, audio settings, replay
+    // isolation and the daily objective through the actual phone interface.
+    const living = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true,reducedMotion:'reduce'}, {
+      campaignLevelVersion:LEVEL_VERSION,levelIndex:2,solved:[levels[2].targets[0]],
+      campaign:{cursor:2,completedLevels:2,bestRun:2,lastCompletedLevelId:2,completedIds:[0,1],puzzleOrder:sequentialPuzzleOrder}
+    });
+    await living.page.locator('[data-action="garden"]').click();
+    await living.page.locator('[data-plant="poppy"]').click();
+    await living.page.locator('[data-plot="0"]').click();
+    await living.page.reload();
+    await living.page.locator('[data-action="garden"]').click();
+    if (!/Poppy/.test(await living.page.locator('[data-plot="0"]').textContent())) throw new Error('Chosen plant did not persist');
+    await living.page.keyboard.press('Escape');
+    await living.page.locator('[data-action="settings"]').click();
+    await living.page.locator('[data-setting="sound"]').click();
+    await living.page.locator('[data-setting="haptics"]').click();
+    await living.page.reload();
+    await living.page.locator('[data-action="settings"]').click();
+    if (await living.page.locator('[data-setting="sound"]').getAttribute('aria-checked') !== 'true' || await living.page.locator('[data-setting="haptics"]').getAttribute('aria-checked') !== 'false') throw new Error('Sound/haptic preferences did not persist');
+    await living.page.keyboard.press('Escape');
+    const beforeReplay = await living.page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')));
+    await living.page.locator('[data-action="progress"]').click();
+    if (await living.page.locator('[data-replay]').count() < 100) throw new Error('Replay map must include at least100levels');
+    await living.page.locator('[data-replay="0"]').click();
+    await living.page.locator('[data-action="hint"]').click();
+    await living.page.locator('#hint-word').selectOption('0');
+    await living.page.locator('[data-action="buy-clue"]').click();
+    for (const word of levels[0].targets) await submitByTap(living.page,word);
+    if (!(await living.page.locator('.level-complete').textContent()).includes('Replay complete')) throw new Error('Replay completion missing');
+    await living.page.locator('.level-complete [data-action="exit-replay"]').click();
+    const afterReplay = await living.page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')));
+    for (const key of ['coins','solved','revealed','bonusFound','campaign','garden','dailyStats']) if (JSON.stringify(beforeReplay[key]) !== JSON.stringify(afterReplay[key])) throw new Error(`Replay changed active ${key}`);
+    await expectBoardAndWheelTogether(living.page,'living garden returned campaign');
+    await living.page.locator('[data-mode="daily"]').click();
+    const dailyDate=await living.page.evaluate(() => new Date().toISOString().slice(0,10));
+    const dailyLevel=getDailyLevel(new Date(`${dailyDate}T00:00:00Z`));
+    const extra=[...new Set(dailyLevel.bonus)].filter(word=>!dailyLevel.targets.includes(word)).slice(0,3);
+    if(extra.length!==3) throw new Error('Daily objective lacks three bonus words');
+    const coinsBeforeDaily=await living.page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')).coins);
+    for(const word of extra) await submitByTap(living.page,word);
+    await expectCoins(living.page,coinsBeforeDaily+16);
+    await living.page.locator('[data-action="progress"]').click();
+    if (!(await living.page.locator('.daily-objective').textContent()).includes('Reward collected')) throw new Error('Daily objective reward not displayed');
+    await living.page.reload();
+    await submitByTap(living.page,extra[0]);
+    await expectCoins(living.page,coinsBeforeDaily+16);
+    await living.context.close();
 
     assertNoRuntimeFailures();
   } catch (error) {

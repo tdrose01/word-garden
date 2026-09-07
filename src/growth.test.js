@@ -26,7 +26,7 @@ test('legacy campaign board survives save/reload then moves to new difficulty', 
   assert.deepEqual(state.solved, old.solved);
   state = finish(state);
   assert.equal(getLevel(state).targets.length, 7);
-  assert.equal(state.campaignLevelVersion, 2);
+  assert.equal(state.campaignLevelVersion, 3);
 });
 
 test('legacy current daily remains pinned while fresh daily uses new rotation', () => {
@@ -34,7 +34,7 @@ test('legacy current daily remains pinned while fresh daily uses new rotation', 
   const oldLevel = getDailyLevel(new Date(), 1);
   const state = loadState(storage({ ...fresh(), daily: {dateKey, solved: [oldLevel.targets[0]], revealed: [], bonusFound: [], completed: false} }));
   assert.deepEqual(getLevel(setMode(state, 'daily')).targets, oldLevel.targets);
-  assert.equal(setMode(fresh(), 'daily').daily.levelVersion, 2);
+  assert.equal(setMode(fresh(), 'daily').daily.levelVersion, 3);
 });
 
 test('daily rotation has no duplicate actual puzzles during entire 41-day cycle', () => {
