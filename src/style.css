@@ -1158,3 +1158,46 @@ button:focus-visible, select:focus-visible { outline: 3px solid #2f7a54; outline
 .expanded-board { display: grid; grid-template-columns: repeat(var(--cols), 36px); grid-template-rows: repeat(var(--rows), 36px); gap: 4px; width: max-content; padding: 4px 4px 10px; }
 .expanded-board .tile { width: 36px; height: 36px; font-size: 19px; }
 .expanded-board .slot-number { font-size: 8px; }
+
+/* A readable grid is more useful than squeezing every cell into a phone. */
+.board-wrap { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 5px; place-items: stretch; padding: 0; overflow: hidden; }
+.level-card { position: static; min-width: 0; color: #18342c; }
+.level-card p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-viewport { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; border: 1px solid #809d76; border-radius: 12px; background: #e6eddc; scrollbar-width: thin; scrollbar-color: #567b53 #e6eddc; }
+.board-viewport:focus-visible { outline: 3px solid #18342c; outline-offset: -3px; }
+.board { width: max-content; min-width: 100%; height: max-content; min-height: 100%; max-width: none; max-height: none; overflow: visible; padding: 8px 8px 12px; align-content: center; justify-content: center; }
+.board .tile { background: #fffdf4; border: 1px solid #799471; color: #17372b; font-size: max(18px, calc(var(--fit-tile-size, 32px) * .52)); line-height: 1; padding-top: 5px; border-radius: 6px; box-shadow: 0 2px 0 #9caf92; }
+.board .tile.is-solved { background: #fffdf4; border: 2px solid #2f6a47; }
+.board .tile.is-revealed { background: #ffe29d; }
+.board .slot-number { color: #314f37; font-size: 9px; top: 1px; left: 2px; }
+.board-scroll-hint { margin: 0; color: #18342c; font-weight: 900; font-size: 11px; line-height: 14px; text-align: center; }
+:root { --letter-size: clamp(44px, 7dvh, 54px); --wheel-size: clamp(156px, 24dvh, 220px); }
+@media (max-height: 700px) {
+  .wheel { width: min(54vw, 156px); }
+  .current-word { min-height: 22px; }
+  .composer { gap: 3px; }
+  .ledger { padding-block: 5px; }
+}
+
+body { background: var(--scene-sky, #e4efdb); }
+body::before, body::after { display: none; }
+.level-scenery { position: fixed; inset: 0; z-index: -1; width: 100%; height: 100%; pointer-events: none; opacity: .85; }
+.level-theme { font-size: .65rem; font-weight: 700; }
+.level-card { min-height: 26px; }
+.level-card__leaf { color: #86563b; }
+.mode-tabs { background: #ffffff80; }
+.eyebrow, .current-word { color: #3b563d; }
+
+/* Give feedback a real place in the ledger instead of floating over tools. */
+.ledger { position: relative; min-height: 42px; padding-right: 94px; }
+.tester-feedback__cta { position: absolute; inset: 50% 7px auto auto; translate: 0 -50%; min-width: 78px; min-height: 30px; padding: 7px 9px; font-size: .64rem; box-shadow: none; }
+
+/* Text guidance stays readable over every scene, including dark tree shapes. */
+.current-word, .board-scroll-hint { background: #f4f6e9; color: #18342c; border-radius: 8px; }
+.board-scroll-hint { min-height: 14px; }
+
+/* Content decides when the page needs more height, even after a hint wraps. */
+body[data-page-scroll="true"] { overflow-y: auto; }
+
+/* Typing must not move the letter wheel underneath an active gesture. */
+.current-word, .current-word.has-word { height: 40px; min-height: 40px; line-height: 1; }

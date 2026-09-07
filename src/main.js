@@ -3,6 +3,7 @@ import '@fontsource/nunito/latin-700.css';
 import '@fontsource/nunito/latin-900.css';
 import '@fontsource/fraunces/latin-700.css';
 import './style.css';
+import { getLevelTheme } from './themes.js';
 import {
   createSnapshot,
   getLevel,
@@ -47,6 +48,12 @@ let renderedDailyDate = state.mode === 'daily' ? getProgress(state).dateKey : nu
 function render() {
   refreshDaily(false);
   const snapshot = createSnapshot(state);
+  const theme = getLevelTheme(snapshot.level);
+  document.body.dataset.scene = theme.scene;
+  for (const [name, value] of Object.entries(theme.colors)) document.body.style.setProperty(`--scene-${name}`, value);
+  const previousViewport = app.querySelector('.board-viewport');
+  const boardKey = `${state.mode}:${snapshot.level.id}:${snapshot.progress.dateKey || ''}:${state.levelIndex}`;
+  const savedScroll = previousViewport?.dataset.boardKey === boardKey ? { left: previousViewport.scrollLeft, top: previousViewport.scrollTop } : { left: 0, top: 0 };
   const progress = getProgress(state);
   const levelLabel = state.mode === 'daily' ? 'Daily' : `Level ${snapshot.campaignStats.currentLevel}`;
   const maxX = Math.max(...snapshot.cells.map((cell) => cell.x));
@@ -55,6 +62,7 @@ function render() {
   const coinChanged = state.coins !== previousCoins;
 
   app.innerHTML = `
+    ${renderLevelScenery(theme)}
     <section class="topbar" aria-label="Game status">
       <div>
         <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>${levelLabel}</p>
@@ -75,10 +83,11 @@ function render() {
     <section class="board-wrap" aria-label="${snapshot.level.title} puzzle board">
       <div class="level-card">
         <span class="level-card__leaf" aria-hidden="true">❧</span>
-        <p>${snapshot.level.title}</p>
+        <p>${snapshot.level.title}<span class="level-theme"> · ${theme.title}</span></p>
         <strong>${progress.solved.length}/${snapshot.level.targets.length}</strong>
         <button class="enlarge-board" data-action="board" aria-label="Enlarge puzzle board">Enlarge board</button>
       </div>
+      <div class="board-viewport" data-board-key="${escapeAttribute(boardKey)}" tabindex="0" role="region" aria-label="Puzzle grid" aria-describedby="board-scroll-hint">
       <div class="board" style="--cols: ${maxX + 1}; --rows: ${maxY + 1};">
         ${snapshot.cells
           .map(
@@ -91,6 +100,8 @@ function render() {
           )
           .join('')}
       </div>
+      </div>
+      <p id="board-scroll-hint" class="board-scroll-hint" aria-live="polite"></p>
     </section>
 
     <section class="composer" aria-label="Word builder">
@@ -129,6 +140,9 @@ function render() {
     </section>
 
     <section class="ledger">
+      <button class="tester-feedback__cta" type="button" aria-expanded="false" aria-controls="tester-feedback-panel">
+        Feedback
+      </button>
       <div>
         <span><span class="ledger-leaf" aria-hidden="true">✿</span> Bonus words</span>
         <strong>${progress.bonusFound.length}</strong>
@@ -148,9 +162,29 @@ function render() {
   bindGamePanel();
   updateSwipeGuide();
   fitBoard();
+  const viewport = app.querySelector('.board-viewport');
+  viewport.scrollTo(savedScroll.left, savedScroll.top);
+  updateBoardScrollHint();
+  viewport.addEventListener('scroll', updateBoardScrollHint, { passive: true });
   previousCoins = state.coins;
 }
 
+
+function renderLevelScenery(theme) {
+  const { sky, mist, ground, foliage, accent } = theme.colors;
+  const hills = `<path d="M0 650Q150 500 310 650T600 600V900H0Z" fill="${mist}"/><path d="M0 820Q150 650 330 780T600 720V900H0Z" fill="${ground}"/>`;
+  let scene = '';
+  if (theme.scene === 'brook') scene = `<path d="M340 520C40 670 550 660 190 900" fill="none" stroke="${accent}" stroke-width="110"/><path d="M340 520C40 670 550 660 190 900" fill="none" stroke="${sky}" stroke-width="3" stroke-dasharray="40 50"/><ellipse cx="100" cy="790" rx="42" ry="20" fill="${foliage}"/><ellipse cx="450" cy="670" rx="26" ry="14" fill="${foliage}"/>`;
+  if (theme.scene === 'woodland') scene = [30,140,440,560].map((x,i)=>`<path d="M${x} 880V${380+i*38}" stroke="${ground}" stroke-width="16"/><ellipse cx="${x}" cy="${440+i*38}" rx="70" ry="150" fill="${foliage}"/><path d="M${x} ${440+i*38}V850" stroke="${ground}" stroke-width="5"/>`).join('');
+  if (theme.scene === 'flowers') scene = [50,160,450,555].map((x,i)=>`<g transform="translate(${x},${690+i%2*70})"><path d="M0 170V0M0 95L-40 60" stroke="${foliage}" stroke-width="8"/><g fill="${accent}"><circle cx="-24" r="28"/><circle cx="24" r="28"/><circle cy="-24" r="28"/><circle cy="24" r="28"/></g><circle r="15" fill="${sky}"/></g>`).join('');
+  if (theme.scene === 'sunrise') scene = `<circle cx="460" cy="360" r="85" fill="${accent}"/><g stroke="${accent}" stroke-width="6" stroke-linecap="round"><path d="M460 225V200M460 495V520M325 360H300M570 360H595M362 262L340 240M555 265L575 245"/></g><path d="M0 780Q200 600 360 720T600 690V900H0Z" fill="${ground}"/>`;
+  if (theme.scene === 'canyon') scene = `<path d="M0 500H110L150 690H190L220 900H0ZM600 430H520L475 590H445L400 900H600Z" fill="${accent}"/><path d="M0 630H135M0 690H150M600 570H486M600 680H430" stroke="${ground}" stroke-width="12"/>`;
+  if (theme.scene === 'moonlight') scene = `<circle cx="480" cy="200" r="56" fill="${accent}"/><circle cx="500" cy="184" r="48" fill="${sky}"/>${[[80,170],[150,330],[420,400],[540,80],[65,510]].map(([x,y])=>`<path d="M${x-7} ${y}H${x+7}M${x} ${y-7}V${y+7}" stroke="${accent}" stroke-width="3"/>`).join('')}`;
+  if (theme.scene === 'alpine') scene = `<path d="M-100 900L100 380L320 900M260 900L490 300L750 900" fill="${foliage}"/><path d="M62 478L100 380L142 480L107 462L90 485ZM448 410L490 300L538 410L505 390L476 420Z" fill="${sky}"/>`;
+  if (theme.scene === 'harvest') scene = [30,80,150,460,530,590].map((x,i)=>`<g transform="translate(${x},${650+i%2*55})"><path d="M0 230V0" stroke="${foliage}" stroke-width="5"/>${[10,35,60,85].map(y=>`<ellipse cx="-10" cy="${y}" rx="9" ry="17" transform="rotate(-35 -10 ${y})" fill="${accent}"/><ellipse cx="10" cy="${y+12}" rx="9" ry="17" transform="rotate(35 10 ${y+12})" fill="${accent}"/>`).join('')}</g>`).join('');
+  if (theme.scene === 'seedlings') scene = [65,185,460,565].map((x,i)=>`<g transform="translate(${x},${740+i%2*60})"><path d="M0 150V0" stroke="${foliage}" stroke-width="7"/><path d="M0 35Q-80-30-65 35Q-40 75 0 50M0 0Q80-70 65 0Q40 40 0 20" fill="${foliage}"/></g>`).join('');
+  return `<svg class="level-scenery" data-scene="${theme.scene}" viewBox="0 0 600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="600" height="900" fill="${sky}"/>${hills}${scene}</svg>`;
+}
 
 function renderSlotNumber(snapshot, cell) {
   const slots = snapshot.placements.flatMap((slot, index) => slot.x === cell.x && slot.y === cell.y ? [index + 1] : []);
@@ -258,9 +292,7 @@ function renderFeedbackPanel(snapshot) {
   const shareSupported = typeof navigator.share === 'function';
   return `
     <section class="tester-feedback" data-feedback-root>
-      <button class="tester-feedback__cta" type="button" aria-expanded="false" aria-controls="tester-feedback-panel">
-        Feedback
-      </button>
+
       <div class="tester-feedback__panel" id="tester-feedback-panel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="tester-feedback-title">
         <div class="tester-feedback__header">
           <div>
@@ -318,7 +350,7 @@ function bindFeedbackEvents(snapshot) {
   const root = app.querySelector('[data-feedback-root]');
   if (!root) return;
 
-  const cta = root.querySelector('.tester-feedback__cta');
+  const cta = app.querySelector('.tester-feedback__cta');
   const panel = root.querySelector('.tester-feedback__panel');
   const close = root.querySelector('[data-feedback-close]');
   const githubButton = root.querySelector('[data-feedback-github]');
@@ -709,38 +741,64 @@ function getLetterPoint(index) {
 }
 
 function fitBoard() {
-  const wrap = app.querySelector('.board-wrap');
-  const board = app.querySelector('.board');
-  const firstTile = board?.querySelector('.tile');
-
-  if (!wrap || !board || !firstTile) {
-    return;
+  const pageScroll = { x: window.scrollX, y: window.scrollY };
+  app.style.removeProperty('min-height');
+  delete document.body.dataset.pageScroll;
+  const wheel = app.querySelector('.wheel');
+  const letters = wheel?.querySelectorAll('.letter');
+  if (letters?.length > 1) {
+    const letterWidth = parseFloat(getComputedStyle(letters[0]).width);
+    // Reserve space for the selected-letter scale as well as a clear gap.
+    // Letter centers sit on a circle with radius 34% of the wheel diameter.
+    const minimumDiameter = Math.ceil((letterWidth * 1.08 + 4) / (2 * .34 * Math.sin(Math.PI / letters.length)));
+    wheel.style.minWidth = `${minimumDiameter}px`;
   }
-
-  board.style.removeProperty('--fit-tile-size');
-
-  const boardStyles = getComputedStyle(board);
+  const viewport = app.querySelector('.board-viewport');
+  const board = app.querySelector('.board');
+  if (!viewport || !board) return;
+  // Long wheels and wrapped feedback need more room than some screens offer.
+  // Preserve a useful grid window and let the page scroll to its controls.
+  for (let pass = 0; pass < 3 && viewport.clientHeight < 96; pass += 1) {
+    const deficit = 96 - viewport.clientHeight;
+    const overflow = Math.max(0, app.scrollHeight - app.clientHeight);
+    app.style.minHeight = `${Math.ceil(app.getBoundingClientRect().height + deficit + overflow + 2)}px`;
+  }
+  if (app.getBoundingClientRect().height > window.innerHeight + 1) document.body.dataset.pageScroll = 'true';
+  const styles = getComputedStyle(board);
   const cols = Number(board.style.getPropertyValue('--cols'));
   const rows = Number(board.style.getPropertyValue('--rows'));
-  const baseTileSize = firstTile.getBoundingClientRect().width;
-  const tileGap = parseFloat(boardStyles.gap);
-  const boardPaddingX = parseFloat(boardStyles.paddingLeft) + parseFloat(boardStyles.paddingRight);
-  const boardPaddingY = parseFloat(boardStyles.paddingTop) + parseFloat(boardStyles.paddingBottom);
-  const availableWidth = wrap.clientWidth;
-  const wrapStyles = getComputedStyle(wrap);
-  const availableHeight = wrap.clientHeight - parseFloat(wrapStyles.paddingTop) - parseFloat(wrapStyles.paddingBottom);
-
-  if (!cols || !rows || !availableWidth || !availableHeight || !baseTileSize || !Number.isFinite(tileGap)) {
-    return;
+  const gap = parseFloat(styles.gap);
+  const paddingX = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+  const paddingY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+  const fitWidth = (viewport.clientWidth - paddingX - gap * (cols - 1)) / cols;
+  const fitHeight = (viewport.clientHeight - paddingY - gap * (rows - 1)) / rows;
+  // Keep words readable; larger boards scroll instead of shrinking their text.
+  const tileSize = Math.max(32, Math.min(46, Math.floor(Math.min(fitWidth, fitHeight))));
+  board.style.setProperty('--fit-tile-size', `${tileSize}px`);
+  // Fitting the tiles can introduce a horizontal scrollbar. Account for its
+  // actual height before finalizing the usable puzzle window.
+  for (let pass = 0; pass < 2 && viewport.clientHeight < 96; pass += 1) {
+    app.style.minHeight = `${Math.ceil(app.getBoundingClientRect().height + 96 - viewport.clientHeight + 2)}px`;
+    document.body.dataset.pageScroll = 'true';
   }
+  if (document.body.dataset.pageScroll === 'true' && (pageScroll.x || pageScroll.y)) window.scrollTo(pageScroll.x, pageScroll.y);
+  updateBoardScrollHint();
+}
 
-  const fitWidth = (availableWidth - boardPaddingX - tileGap * (cols - 1)) / cols;
-  const fitHeight = (availableHeight - boardPaddingY - tileGap * (rows - 1)) / rows;
-  const fittedTileSize = Math.max(10, Math.floor(Math.min(baseTileSize, fitWidth, fitHeight) - 1));
-
-  if (Number.isFinite(fittedTileSize) && fittedTileSize > 0) {
-    board.style.setProperty('--fit-tile-size', `${fittedTileSize}px`);
-  }
+function updateBoardScrollHint() {
+  const viewport = app.querySelector('.board-viewport');
+  const hint = app.querySelector('.board-scroll-hint');
+  if (!viewport || !hint) return;
+  const horizontal = viewport.scrollWidth > viewport.clientWidth + 1;
+  const vertical = viewport.scrollHeight > viewport.clientHeight + 1;
+  const directions = [];
+  if (horizontal && viewport.scrollLeft > 1) directions.push('←');
+  if (horizontal && viewport.scrollLeft < viewport.scrollWidth - viewport.clientWidth - 1) directions.push('→');
+  if (vertical && viewport.scrollTop > 1) directions.push('↑');
+  if (vertical && viewport.scrollTop < viewport.scrollHeight - viewport.clientHeight - 1) directions.push('↓');
+  viewport.dataset.overflow = horizontal || vertical ? 'true' : 'false';
+  const label = horizontal || vertical ? `Scroll grid to see more ${directions.join(' ')}` : 'All words in view';
+  if (hint.textContent !== label) hint.textContent = label;
 }
 
 window.addEventListener('resize', fitBoard);
@@ -1027,3 +1085,6 @@ function getThemeCompletionDetails(beforeStats, afterStats) {
 }
 
 render();
+
+// Recalculate after web fonts settle so compact screens keep usable board space.
+document.fonts.ready.then(() => fitBoard());
