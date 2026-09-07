@@ -99,3 +99,14 @@ export function getLevelTheme(level) {
     sourceWord, scene, colors: { ...PALETTES[scene], ...(accent ? { accent } : {}) }
   };
 }
+
+// Keep scenery, but never repeat a required answer in its display copy.
+export function safeSceneText(text, level, fallback = 'Wordplay') {
+  const words = text.toUpperCase().match(/[A-Z]+/g) || [];
+  return words.some(word => level.targets.includes(word)) ? fallback : text;
+}
+export function getPuzzleTheme(level) {
+  const theme = getLevelTheme(level);
+  return { ...theme, title: safeSceneText(theme.title, level),
+    description: safeSceneText(theme.description, level, '') };
+}

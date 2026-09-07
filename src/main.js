@@ -3,7 +3,9 @@ import '@fontsource/nunito/latin-700.css';
 import '@fontsource/nunito/latin-900.css';
 import '@fontsource/fraunces/latin-700.css';
 import './style.css';
-import { getLevelTheme } from './themes.js';
+import { prepareWheel } from './wheel.js';
+import { writeProgress, createBackup, parseBackup, MAX_BACKUP_BYTES } from './persistence.js';
+import { getPuzzleTheme as getLevelTheme, safeSceneText } from './themes.js';
 import { botanicalScenery, plantArt } from './botanical.js';
 import { playGardenTone } from './sensory.js';
 import {
@@ -11,17 +13,23 @@ import {
   updateSettings,
   startReplay,
   exitReplay,
-  createSnapshot,
+  createSnapshot as createGameSnapshot,
   getLevel,
   getProgress,
   loadState,
   resetState,
-  saveState,
   setMode,
-  shuffleLetters,
   submitWord,
   useHint
 } from './game.js';
+
+function createSnapshot(value) {
+  const snapshot = createGameSnapshot(value);
+  const pack = snapshot.campaignStats.pack;
+  snapshot.campaignStats.pack = { ...pack, title: safeSceneText(pack.title, snapshot.level),
+    nextTitle: safeSceneText(pack.nextTitle, snapshot.level) };
+  return snapshot;
+}
 
 const app = document.querySelector('#app');
 const BUILD_VERSION = '0.1.0-web';
@@ -35,10 +43,11 @@ const FEEDBACK_CATEGORIES = [
   { value: 'performance', label: 'Performance' },
   { value: 'idea', label: 'Idea' }
 ];
-let state = loadState();
-let wheelLetters = getLevel(state).letters;
+let saveNotice = 'Autosave is attempted after each change. Save now to confirm.';
+let state = loadState(undefined, undefined, () => { saveNotice = 'Could not read browser progress. Download a backup before leaving this session.'; });
+let wheelLetters = prepareWheel(getLevel(state));
 let selection = [];
-let message = 'Find every word hidden in the garden.';
+let message = saveNotice.startsWith('Could not') ? saveNotice : 'Find every word hidden in the garden.';
 let completion = null;
 let isSwiping = false;
 let selectionChangedDuringSwipe = false;
@@ -49,6 +58,16 @@ let panel = null;
 let boardResizeObserver;
 let selectedPlant = null;
 let gardenNotice = '';
+let pendingImport = null;
+let importReadId = 0;
+let importNotice = '';
+function saveState(value) {
+  const result = writeProgress(value);
+  saveNotice = result.message;
+  if (!result.ok) message = result.message;
+  app.querySelectorAll('[data-save-status]').forEach(status => { status.textContent = saveNotice; });
+  return result.ok;
+}
 let rewardInFlight = false;
 let hintTarget = null;
 let hintCell = null;
@@ -90,10 +109,10 @@ function render() {
       ${renderGarden(snapshot.gardenStats)}
     </section>
 
-    <section class="board-wrap" aria-label="${snapshot.level.title} puzzle board">
+    <section class="board-wrap" aria-label="${state.mode === 'daily' ? 'Daily puzzle' : 'Clearing ' + snapshot.level.id} puzzle board">
       <div class="level-card">
         <span class="level-card__leaf" aria-hidden="true">❧</span>
-        <p>${snapshot.level.title}<span class="level-theme"> · ${theme.title}</span></p>
+        <p>${state.mode === 'daily' ? 'Daily puzzle' : 'Clearing ' + snapshot.level.id}<span class="level-theme"> · ${theme.title}</span></p>
         <strong>${progress.solved.length}/${snapshot.level.targets.length}</strong>
         <button class="enlarge-board" data-action="board" aria-label="Enlarge puzzle board">Enlarge board</button>
       </div>
@@ -200,16 +219,17 @@ function renderGardenScene(stats = {}) {
   const planted = (stats.plots || []).filter(plot => plot.plantId);
   return `<svg class="garden-scene" viewBox="0 0 360 130" aria-hidden="true"><rect width="360" height="130" rx="14" fill="#e1ebd3"/><circle cx="306" cy="24" r="17" fill="#f4d78b"/><path d="M0 85Q86 47 187 78T360 65V130H0Z" fill="#b1c79a"/><path d="M155 130Q206 98 173 70" fill="none" stroke="#ecdcba" stroke-width="25"/>
     ${[0,1,2].map(i=>`<g transform="translate(${18+i*140} 7) scale(.6)"><path d="M0 128V48" stroke="#7c7351" stroke-width="8"/><path d="M-30 75Q-54 40-20 31Q-13-11 17 21Q54 12 41 53Q51 91 5 85Z" fill="#6c956c"/><path d="M0 52L-13 37M0 65L20 43" stroke="#b4c590" stroke-width="2"/></g>`).join('')}
-    ${(planted.length ? planted : [{plantId:'daisy',color:'#dda889',stage:'seedling'}]).slice(0,8).map((plot,i)=>`<g class="garden-flower" transform="translate(${12+i*42} ${39+(i%2)*12}) scale(.7)">${plantArt(plot,plot.stage)}</g>`).join('')}</svg>`;
+    ${planted.slice(0,8).map((plot,i)=>`<g class="garden-flower" transform="translate(${12+i*42} ${39+(i%2)*12}) scale(.7)">${plantArt(plot,plot.stage)}</g>`).join('')}</svg>`;
 }
 
 function renderGardenWorkbench(stats) {
   const plants = stats.plants || [];
   if (!plants.some(plant => plant.id === selectedPlant)) selectedPlant = plants[0]?.id;
   return `${renderGardenScene(stats)}<div class="garden-summary"><span><strong>${stats.seedCredits || 0}</strong> seeds to plant</span><span><strong>${stats.unlockedAreas || 1}</strong> garden areas</span></div>
-    <p class="panel-note">Choose a plant, then an empty plot. Complete puzzles to earn seeds and grow your plants.</p>
+    <p class="panel-note">1. Choose a plant. 2. Pick an empty plot (1 seed). Complete campaign or daily puzzles to earn seeds; replays do not grow plants.</p>
     <div class="plant-palette" role="group" aria-label="Choose a plant">${plants.map(plant=>`<button data-plant="${escapeAttribute(plant.id)}" aria-pressed="${selectedPlant === plant.id}"><svg viewBox="0 0 80 95" aria-hidden="true">${plantArt(plant)}</svg><span>${escapeAttribute(plant.name)}</span></button>`).join('')}</div>
-    <div class="garden-plots" role="group" aria-label="Your garden plots">${(stats.plots || []).map(plot=>`<button class="garden-plot ${plot.plantId ? 'is-planted' : ''}" data-plot="${plot.index}" ${plot.plantId || !(stats.seedCredits > 0) ? 'disabled' : ''} aria-label="Plot ${plot.index+1}: ${plot.plantId ? escapeAttribute(plot.name)+' '+plot.stage : 'empty, plant selected seed'}"><svg viewBox="0 0 80 95" aria-hidden="true">${plot.plantId ? plantArt(plot,plot.stage) : '<ellipse cx="40" cy="73" rx="27" ry="9" fill="#ae9474"/><path d="M40 33V53M30 43H50" stroke="#5e7855" stroke-width="3" stroke-linecap="round"/>'}</svg><strong>${plot.plantId ? escapeAttribute(plot.name) : 'Plant here'}</strong><small>${plot.plantId ? plot.stage : 'Plot '+(plot.index+1)}</small></button>`).join('')}</div>
+    <p class="selected-plant">Selected: <strong>${plants.find(plant => plant.id === selectedPlant)?.name}</strong> · ${stats.seedCredits > 0 ? 'Choose an empty plot below.' : 'No seeds left. Complete a campaign or daily puzzle to earn one.'}</p>
+    <div class="garden-plots" role="group" aria-label="Your garden plots">${(stats.plots || []).map(plot=>`<button class="garden-plot ${plot.plantId ? 'is-planted' : ''}" data-plot="${plot.index}"  aria-label="Plot ${plot.index+1}: ${plot.plantId ? escapeAttribute(plot.name)+' '+plot.stage : 'empty, plant '+plants.find(plant=>plant.id===selectedPlant)?.name+' for 1 seed'}"><svg viewBox="0 0 80 95" aria-hidden="true">${plot.plantId ? plantArt(plot,plot.stage) : '<ellipse cx="40" cy="73" rx="27" ry="9" fill="#ae9474"/><path d="M40 33V53M30 43H50" stroke="#5e7855" stroke-width="3" stroke-linecap="round"/>'}</svg><strong>${plot.plantId ? escapeAttribute(plot.name) : 'Plant here'}</strong><small>${plot.plantId ? plot.stage : 'Plot '+(plot.index+1)}</small></button>`).join('')}</div>
     <p class="garden-notice" role="status">${escapeAttribute(gardenNotice || (stats.nextPlotAt ? 'More plots open as you complete puzzles. Next expansion at '+stats.nextPlotAt+' completions.' : 'Your garden has room to flourish.'))}</p>`;
 }
 
@@ -220,7 +240,7 @@ function renderObjectives(snapshot) {
 }
 
 function renderLevelMap(snapshot) {
-  return `<section class="level-map" aria-label="Level map"><h3>Your garden path</h3><p class="panel-note">Revisit a cleared puzzle for a relaxed practice round. Replays keep your coins, seeds and campaign progress safe.</p>${state.mode === 'replay' ? '<button data-action="exit-replay">Return to current level</button>' : ''}<div class="level-map__list">${(snapshot.levelMap || []).map(level=>`<button data-replay="${level.levelIndex}" ${!level.completed ? 'disabled' : ''} aria-label="${level.completed ? 'Replay' : level.current ? 'Current' : 'Locked'} level ${level.levelIndex+1}, ${escapeAttribute(level.title)}"><span>${level.levelIndex+1}</span><strong>${escapeAttribute(level.title)}</strong><small>${level.completed ? 'Replay ↗' : level.current ? 'You are here' : 'Locked'}</small></button>`).join('')}</div></section>`;
+  return `<section class="level-map" aria-label="Level map"><h3>Your garden path</h3><p class="panel-note">Revisit a cleared puzzle for a relaxed practice round. Replays keep your coins, seeds and campaign progress safe.</p>${state.mode === 'replay' ? '<button data-action="exit-replay">Return to current level</button>' : ''}<div class="level-map__list">${(snapshot.levelMap || []).map(level=>`<button data-replay="${level.levelIndex}" ${!level.completed ? 'disabled' : ''} aria-label="${level.completed ? 'Replay' : level.current ? 'Current' : 'Locked'} level ${level.levelIndex+1}, ${'Clearing '+(level.levelIndex+1)}"><span>${level.levelIndex+1}</span><strong>${'Clearing '+(level.levelIndex+1)}</strong><small>${level.completed ? 'Replay ↗' : level.current ? 'You are here' : 'Locked'}</small></button>`).join('')}</div></section>`;
 }
 
 function renderGarden(stats = {}) {
@@ -232,7 +252,7 @@ function renderGarden(stats = {}) {
 function renderGamePanel(snapshot) {
   if (!panel) return '';
   let title = 'Settings';
-  let content = `<p>Your progress is saved automatically on this device.</p><div class="settings-list"><button data-setting="sound" role="switch" aria-checked="${Boolean(snapshot.settings?.sound)}"><span><strong>Garden sounds</strong><small>Soft letter tones and a completion melody</small></span><b>${snapshot.settings?.sound ? 'On' : 'Off'}</b></button><button data-setting="haptics" role="switch" aria-checked="${snapshot.settings?.haptics !== false}"><span><strong>Touch feedback</strong><small>Gentle vibration on supported devices</small></span><b>${snapshot.settings?.haptics !== false ? 'On' : 'Off'}</b></button></div><p class="panel-note">Animations follow your device’s reduced-motion preference.</p><button data-action="reset">Reset progress…</button>`;
+  let content = `<section class="save-controls" aria-label="Save and backup"><p>Progress stays in this browser only. No cloud account or sync. Clearing browser data removes it; keep a backup for another device.</p><button data-action="save-progress">Save progress</button><p data-save-status role="status">${escapeAttribute(saveNotice)}</p><button data-action="download-backup">Download JSON backup</button><label class="backup-input">Import JSON backup<input type="file" accept=".json,application/json" data-import-backup></label><p role="status">${escapeAttribute(importNotice)}</p>${pendingImport ? `<div class="import-preview"><h3>Replace progress?</h3><p>Backup: ${pendingImport.campaign.completedLevels} campaign completions, ${pendingImport.coins} coins, ${pendingImport.garden?.plots.length || 0} planted plots. Mode: ${pendingImport.mode}.</p><p>Current: ${createSnapshot(state).campaignStats.completedLevels} campaign completions, ${state.coins} coins. This replaces campaign, daily, replay, garden and settings. Download your current backup first if you want to keep it.</p><button data-action="confirm-import">Replace with this backup</button><button data-action="cancel-import">Cancel import</button></div>` : ''}</section><div class="settings-list"><button data-setting="sound" role="switch" aria-checked="${Boolean(snapshot.settings?.sound)}"><span><strong>Garden sounds</strong><small>Soft letter tones and a completion melody</small></span><b>${snapshot.settings?.sound ? 'On' : 'Off'}</b></button><button data-setting="haptics" role="switch" aria-checked="${snapshot.settings?.haptics !== false}"><span><strong>Touch feedback</strong><small>Gentle vibration on supported devices</small></span><b>${snapshot.settings?.haptics !== false ? 'On' : 'Off'}</b></button></div><p class="panel-note">Animations follow your device’s reduced-motion preference.</p><button data-action="reset">Reset progress…</button>`;
   if (panel === 'confirm-reset') {
     title = 'Reset your garden?';
     content = '<p>This clears your levels, coins, daily streaks and garden on this device.</p><button data-action="confirm-reset" class="danger">Yes, reset all progress</button>';
@@ -270,12 +290,31 @@ function renderGamePanel(snapshot) {
 }
 
 function closeGamePanel() {
+  importReadId++; pendingImport = null; importNotice = '';
   panel = null;
   render();
   app.querySelector(`[data-action="${panelReturnFocus}"]`)?.focus();
 }
 
 function bindGamePanel() {
+  app.querySelector('[data-import-backup]')?.addEventListener('change', async event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    pendingImport = null;
+    const readId = ++importReadId;
+    try {
+      if (file.size > MAX_BACKUP_BYTES) throw new Error('Backup is too large. Maximum size is 1 MB.');
+      const text = await file.text();
+      if (readId !== importReadId || panel !== 'settings') return;
+      pendingImport = parseBackup(text);
+      importNotice = 'Backup checked. Review before replacing progress.';
+    } catch (error) {
+      if (readId !== importReadId || panel !== 'settings') return;
+      importNotice = error.message;
+    }
+    render();
+    app.querySelector('[data-action="confirm-import"]')?.focus();
+  });
   app.querySelectorAll('[data-setting]').forEach(button => button.addEventListener('click', () => {
     const key = button.dataset.setting;
     const settings = createSnapshot(state).settings || {};
@@ -290,14 +329,26 @@ function bindGamePanel() {
     app.querySelector(`[data-plant="${selectedPlant}"]`)?.focus();
   }));
   app.querySelectorAll('[data-plot]').forEach(button => button.addEventListener('click', () => {
-    const result = plantSeed(state, { plotIndex: Number(button.dataset.plot), plantId: selectedPlant });
-    state = result.state; gardenNotice = result.message; saveState(state); pulse(result.status); render();
-    app.querySelector('[data-plant][aria-pressed="true"]')?.focus();
+    const index = Number(button.dataset.plot);
+    const stats = createSnapshot(state).gardenStats;
+    const plot = stats.plots[index];
+    if (plot.plantId) {
+      const age = stats.totalCompletions - plot.plantedAt;
+      gardenNotice = `Plot ${index+1}: ${plot.name}, ${plot.stage}. ` + (age >= 5 ? 'Fully grown! Enjoy your bloom. No seed spent.' : `${age < 2 ? `Complete ${2-age} more campaign or daily puzzles to reach growing; ` : 'Keep completing campaign or daily puzzles; '}${5-age} more to bloom. No seed spent.`);
+    } else {
+      const result = plantSeed(state, { plotIndex: index, plantId: selectedPlant });
+      state = result.state;
+      gardenNotice = result.status === 'planted' ? `${stats.plants.find(p=>p.id===selectedPlant).name} planted in plot ${index+1}. 1 seed used. Growing after 2 more completions; blooming after 5. Click this plot to inspect it.` : result.message;
+      if (result.status === 'planted') saveState(state);
+      pulse(result.status);
+    }
+    render();
+    app.querySelector(`[data-plot="${index}"]`)?.focus();
   }));
   app.querySelectorAll('[data-replay]').forEach(button => button.addEventListener('click', () => {
     const result = startReplay(state, Number(button.dataset.replay));
     state = result.state; message = result.message; panel = null; completion = null;
-    wheelLetters = getLevel(state).letters; selection = []; saveState(state); render();
+    wheelLetters = prepareWheel(getLevel(state)); selection = []; saveState(state); render();
     app.querySelector('.letter')?.focus();
   }));
   const dialog = app.querySelector('.game-panel');
@@ -553,9 +604,9 @@ function getDeviceLabel() {
 
 function getFeedbackLevelLabel(snapshot) {
   if (state.mode === 'daily') {
-    return `Daily - ${snapshot.level.title}`;
+    return `Daily - ${state.mode === 'daily' ? 'Daily puzzle' : 'Clearing ' + snapshot.level.id}`;
   }
-  return `Level ${snapshot.campaignStats.currentLevel}/${snapshot.campaignStats.totalLevels} - ${snapshot.level.title} (${snapshot.campaignStats.pack.title})`;
+  return `Level ${snapshot.campaignStats.currentLevel}/${snapshot.campaignStats.totalLevels} - ${state.mode === 'daily' ? 'Daily puzzle' : 'Clearing ' + snapshot.level.id} (${snapshot.campaignStats.pack.title})`;
 }
 
 function feedbackValue(root, selector) {
@@ -688,7 +739,7 @@ function bindEvents() {
   app.querySelectorAll('[data-mode]').forEach((button) => {
     button.addEventListener('click', () => {
       state = setMode(state, button.dataset.mode);
-      wheelLetters = getLevel(state).letters;
+      wheelLetters = prepareWheel(getLevel(state));
       selection = [];
       feedback = null;
       message = state.mode === 'daily' ? 'Today has its own little garden.' : 'Back to the level path.';
@@ -839,7 +890,7 @@ function refreshDaily(redraw = true) {
   if (dateKey === renderedDailyDate) return false;
   renderedDailyDate = dateKey;
   state = setMode(state, 'daily');
-  wheelLetters = getLevel(state).letters;
+  wheelLetters = prepareWheel(getLevel(state));
   selection = [];
   isSwiping = false;
   selectionChangedDuringSwipe = false;
@@ -929,12 +980,27 @@ function endSwipe() {
 
 function handleAction(action) {
   if (refreshDaily()) return;
+  if (action === 'save-progress') { saveState(state); render(); app.querySelector('[data-action="save-progress"]')?.focus(); }
+  if (action === 'download-backup') {
+    const url = URL.createObjectURL(new Blob([createBackup(state)], {type:'application/json'}));
+    const link = document.createElement('a'); link.href = url; link.download = 'word-garden-backup.json'; link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    importNotice = 'Backup download requested. Check your browser downloads.'; render();
+  }
+  if (action === 'cancel-import') { importReadId++; pendingImport = null; importNotice = 'Import cancelled. Progress unchanged.'; render(); }
+  if (action === 'confirm-import' && pendingImport) {
+    if (saveState(pendingImport)) {
+      state = pendingImport; pendingImport = null; selection = []; completion = null; feedback = null;
+      wheelLetters = prepareWheel(getLevel(state)); importNotice = 'Backup imported and saved in this browser.';
+    } else { importNotice = 'Import not applied. Current progress is unchanged.'; }
+    render();
+  }
   if (action === 'visit-garden') {
     completion = null; rewardInFlight = false; panel = 'garden'; panelReturnFocus = 'garden'; render();
   }
   if (action === 'exit-replay') {
     state = exitReplay(state); panel = null; completion = null; selection = [];
-    wheelLetters = getLevel(state).letters; message = 'Back to your garden path.'; saveState(state); render();
+    wheelLetters = prepareWheel(getLevel(state)); message = 'Back to your garden path.'; saveState(state); render();
   }
   if (action === 'submit') {
     handleSubmit();
@@ -954,7 +1020,7 @@ function handleAction(action) {
     render();
   }
   if (action === 'shuffle') {
-    wheelLetters = shuffleLetters(wheelLetters);
+    wheelLetters = prepareWheel(getLevel(state));
     selection = [];
     feedback = { tone: 'shuffle', label: 'Fresh letters' };
     message = 'Wheel shuffled.';
@@ -969,12 +1035,14 @@ function handleAction(action) {
     render();
   }
   if (action === 'reset') {
+    importReadId++; pendingImport = null; importNotice = '';
     panel = 'confirm-reset';
     render();
   }
   if (action === 'confirm-reset') {
-    state = resetState();
-    wheelLetters = getLevel(state).letters;
+    try { state = resetState(); } catch { saveNotice = 'Reset failed: browser storage is unavailable. Progress unchanged.'; panel = 'settings'; render(); return; }
+    saveState(state);
+    wheelLetters = prepareWheel(getLevel(state));
     selection = [];
     completion = null;
     panel = null;
@@ -1018,7 +1086,7 @@ function handleSubmit() {
   feedback = createFeedback(result, word);
 
   if (state.levelIndex !== previousLevel) {
-    wheelLetters = getLevel(state).letters;
+    wheelLetters = prepareWheel(getLevel(state));
   }
 
   if (result.status === 'level-complete') {

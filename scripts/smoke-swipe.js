@@ -1,3 +1,4 @@
+import { runPlaytestRegression } from './playtest-regression.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -7,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { levels, getDailyLevel, dailyLevels, LEVEL_VERSION } from '../src/levels.js';
+import { wheelSpellsTarget } from '../src/wheel.js';
 import { getLevelTheme } from '../src/themes.js';
 import { resolveSmokeBrowser, resolveSmokeTarget } from './smoke-target.js';
 
@@ -399,8 +401,8 @@ async function expectLevelTwo(page) {
   await page.waitForFunction(() => document.querySelector('.eyebrow')?.textContent?.trim() === 'Level 2');
 
   const levelTitle = await page.locator('.level-card p').evaluate(el => [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
-  if (levelTitle !== 'Brook') {
-    throw new Error(`Expected level card to show Brook, got ${levelTitle}`);
+  if (levelTitle !== 'Clearing 2') {
+    throw new Error(`Expected level card to show Clearing 2, got ${levelTitle}`);
   }
 
   const campaignLevel = await page.locator('.compact-progress > span').first().textContent();
@@ -415,8 +417,8 @@ async function expectLevelThree(page) {
   await page.waitForFunction(() => document.querySelector('.eyebrow')?.textContent?.trim() === 'Level 3');
 
   const levelTitle = await page.locator('.level-card p').evaluate(el => [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
-  if (levelTitle !== 'Orchard') {
-    throw new Error(`Expected level card to show Orchard, got ${levelTitle}`);
+  if (levelTitle !== 'Clearing 3') {
+    throw new Error(`Expected level card to show Clearing 3, got ${levelTitle}`);
   }
 
   const campaignLevel = await page.locator('.compact-progress > span').first().textContent();
@@ -852,6 +854,7 @@ try {
       await matrix.page.waitForSelector('.letter');
       await matrix.page.evaluate(() => document.fonts.ready);
       if (sortedLetters(await wheelLetters(matrix.page)) !== sortedLetters(levels[index].letters)) throw new Error(`Campaign matrix loaded the wrong puzzle at ${index+1}`);
+      if (wheelSpellsTarget((await wheelLetters(matrix.page)).join(''),levels[index].targets)) throw new Error(`Campaign wheel leaks answer ${index+1}`);
       await expectBoardAndWheelTogether(matrix.page, `campaign shape ${index+1}`);
     }
     const dailyEpoch = Date.parse('2030-01-01T12:00:00Z');
@@ -864,6 +867,7 @@ try {
       await matrix.page.waitForSelector('.letter');
       await matrix.page.evaluate(() => document.fonts.ready);
       if(sortedLetters(await wheelLetters(matrix.page))!==sortedLetters(getDailyLevel(date).letters)) throw new Error(`Daily matrix loaded wrong puzzle ${index}`);
+      if (wheelSpellsTarget((await wheelLetters(matrix.page)).join(''),getDailyLevel(date).targets)) throw new Error(`Daily wheel leaks answer ${index+1}`);
       await expectBoardAndWheelTogether(matrix.page,`daily shape ${index+1}`);
     }
     await matrix.context.close();
@@ -1066,6 +1070,7 @@ try {
     await expectCoins(living.page,coinsBeforeDaily+16);
     await living.context.close();
 
+    await runPlaytestRegression(browser, url);
     assertNoRuntimeFailures();
   } catch (error) {
     if (runtimeFailures.length > 0 && !error.message.startsWith('Browser runtime failures:')) {

@@ -9,15 +9,16 @@ const STORAGE_KEY = 'word-garden-state';
 const CAMPAIGN_MILESTONE_EVERY = 5;
 const CAMPAIGN_MILESTONE_REWARD = 25;
 
-export function loadState(storage = window.localStorage, random = Math.random) {
+export function loadState(storage, random = Math.random, onError = () => {}) {
   try {
-    const stored = JSON.parse(storage.getItem(STORAGE_KEY) || 'null');
+    const stored = JSON.parse((storage ?? window.localStorage).getItem(STORAGE_KEY) || 'null');
     if (!stored) {
       return createInitialState(random);
     }
 
     return normalizeState(stored, random);
   } catch {
+    onError();
     return createInitialState(random);
   }
 }
