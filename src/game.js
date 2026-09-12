@@ -589,15 +589,41 @@ export function updateSettings(state, changes) {
   return { ...state, settings };
 }
 
-export function plantSeed(state, { plotIndex, plantId } = {}) {
+function storedGarden(garden) {
+  return { plots: garden.plots.filter(plot => plot.plantId).map(({ index, plantId, plantedAt, bloomCollected }) => ({ index, plantId, plantedAt, bloomCollected })),
+    seedsSpent: garden.seedsSpent, collectedBloomCount: garden.collectedBloomCount, collectedSpecies: garden.collectedSpecies, design: garden.design };
+}
+export function plantSeed(state, { plotIndex, plantId, replant = false } = {}) {
   const garden = createGardenStats(state);
+  if (state.mode === 'replay') return { state, status: 'blocked', message: 'Return to your journey to tend the garden.' };
   if (!Number.isInteger(plotIndex) || plotIndex < 0 || plotIndex >= garden.unlockedPlots || !garden.plants.some(plant => plant.id === plantId))
     return { state, status: 'blocked', message: 'Choose an unlocked plot and a plant.' };
-  if (garden.plots[plotIndex].plantId) return { state, status: 'blocked', message: 'A plant is already growing there.' };
+  const plot = garden.plots[plotIndex];
+  if (plot.plantId && !(replant && plot.bloomCollected)) return { state, status: 'blocked', message: 'Collect this bloom before replanting.' };
   if (garden.seedCredits < 1) return { state, status: 'blocked', message: 'Complete a puzzle to earn another seed.' };
-  const plots = garden.plots.filter(plot => plot.plantId).map(({ index, plantId, plantedAt }) => ({ index, plantId, plantedAt }));
-  return { state: { ...state, garden: { plots: [...plots, { index: plotIndex, plantId, plantedAt: garden.totalCompletions }] } }, status: 'planted', message: 'Your new plant is growing!' };
+  const next = storedGarden(garden);
+  next.plots = next.plots.filter(plot => plot.index !== plotIndex);
+  next.plots.push({ index: plotIndex, plantId, plantedAt: garden.totalCompletions, bloomCollected: false });
+  next.seedsSpent++;
+  return { state: { ...state, garden: next }, status: 'planted', message: 'Your new plant is growing! 1 seed used.' };
 }
+export function collectBloom(state, plotIndex) {
+  const garden = createGardenStats(state);
+  const plot = garden.plots[plotIndex];
+  if (state.mode === 'replay' || !Number.isInteger(plotIndex) || !plot || plot.stage !== 'blooming' || plot.bloomCollected)
+    return { state, status: 'blocked', message: 'This bloom is not ready to collect.' };
+  const next = storedGarden(garden);
+  next.plots.find(plot => plot.index === plotIndex).bloomCollected = true;
+  next.collectedBloomCount++;
+  next.collectedSpecies = [...new Set([...next.collectedSpecies, plot.plantId])];
+  return { state: { ...state, coins: state.coins + 5, garden: next }, status: 'bloom', message: `${plot.name} bloomed! +5 coins. Keep your flower or replant for 1 seed.` };
+}
+export function chooseGardenDesign(state, designId) {
+  const garden = createGardenStats(state);
+  if (!garden.designs.some(design => design.id === designId && design.unlocked)) return { state, status: 'blocked', message: 'Collect more blooms to unlock this design.' };
+  return { state: { ...state, garden: { ...storedGarden(garden), design: designId } }, status: 'design', message: 'Your garden has a new look.' };
+}
+
 
 function createLevelMap(state) {
   const campaign = getCampaignProgress(state);

@@ -1341,3 +1341,18 @@ body[data-page-scroll="true"] { overflow-y: auto; }
 .import-preview button { margin-top: .6rem; }
 .selected-plant { padding: .7rem; background: #e7edda; border-radius: 10px; }
 .garden-notice { min-height: 3em; }
+
+/* Garden workbench stays readable on narrow phones and supports keyboard controls. */
+.garden-designs > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.garden-designs button { display:grid; gap:6px; padding:12px 7px; min-width:0; }
+.garden-designs button[aria-pressed="true"] { outline:3px solid #627d53; outline-offset:2px; }
+.garden-designs button:disabled { opacity:.7; }
+.bloom-album { margin:20px 0; padding:16px; border-radius:18px; background:#f2eddb; }
+.bloom-album > div { display:flex; flex-wrap:wrap; gap:7px; }
+.bloom-album span { padding:5px 9px; border:1px dashed #8c947e; border-radius:20px; }
+.bloom-album .is-collected { background:#d9e6c5; border-style:solid; }
+.garden-plot-card { display:flex; flex-direction:column; gap:7px; min-width:0; }
+.garden-plot-card .garden-plot { width:100%; flex:1; }
+.garden-plot-card > button { font-size:.78rem; min-height:44px; padding:8px; }
+.growth-count { text-align:center; }
+@media(max-width:380px) { .garden-designs > div { grid-template-columns:1fr; } }
