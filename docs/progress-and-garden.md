@@ -18,3 +18,11 @@ Puzzle headings and map entries use numbered clearings. Scenery and pack copy av
 - `WORD_GARDEN_SMOKE_DISPLAY=headless npm run test:smoke`
 
 Full smoke retains the 141-board layout matrix and includes the Chromebook/compact-phone save and planting regression. It downloads a real backup, imports it into a fresh browser context, reloads, checks rejection/failure preservation, and writes screenshots under untracked `state/screenshots/`. For a running local server, the focused check is `node scripts/playtest-regression.mjs http://127.0.0.1:4318`.
+
+Swipe back over the previous letter to undo the tail of your word. Continuing forward adds letters again; the same wheel position cannot be used twice. Accepted bonus words immediately clear the word builder, active letters, and swipe guide.
+
+Each campaign or daily completion keeps its existing coin reward and earns one seed. The completion card shows the seed, newly blooming flowers and any new plots. Mature flowers offer **Collect bloom · +5 coins** once per planting. Collection keeps the flower on display and adds it to your permanent six-species album. Choose another species and explicitly replace a collected flower for one seed to start a new growth cycle. Replays cannot collect, plant or replant.
+
+Collect three lifetime blooms to unlock **Moonlit Garden**, six for **Sunroom**, and twelve for the fountain landmark in every design. Meadow stays available from the start. Designs are free and only change scenery. The garden shows unlock progress and a **Tend flowers** shortcut. Lifetime collection, selected design, each flower's collection status and total seeds spent travel with your JSON backup. Older planted gardens retain their growth and receive no automatic coins; mature legacy flowers can be collected manually.
+
+The CI smoke includes `scripts/garden-regression.mjs`: mouse/touch backtracking, actual bonus swipe submission and clearing, replant costs, collection, design persistence, fountain unlock, and 320px/Chromebook layout screenshots.

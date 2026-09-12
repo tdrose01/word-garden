@@ -3,13 +3,15 @@ import '@fontsource/nunito/latin-700.css';
 import '@fontsource/nunito/latin-900.css';
 import '@fontsource/fraunces/latin-700.css';
 import './style.css';
-import { prepareWheel } from './wheel.js';
+import { prepareWheel, extendSelection } from './wheel.js';
 import { writeProgress, createBackup, parseBackup, MAX_BACKUP_BYTES } from './persistence.js';
 import { getPuzzleTheme as getLevelTheme, safeSceneText } from './themes.js';
 import { botanicalScenery, plantArt } from './botanical.js';
 import { playGardenTone } from './sensory.js';
 import {
   plantSeed,
+  collectBloom,
+  chooseGardenDesign,
   updateSettings,
   startReplay,
   exitReplay,
@@ -217,19 +219,25 @@ function renderCompactProgress(snapshot) {
 
 function renderGardenScene(stats = {}) {
   const planted = (stats.plots || []).filter(plot => plot.plantId);
-  return `<svg class="garden-scene" viewBox="0 0 360 130" aria-hidden="true"><rect width="360" height="130" rx="14" fill="#e1ebd3"/><circle cx="306" cy="24" r="17" fill="#f4d78b"/><path d="M0 85Q86 47 187 78T360 65V130H0Z" fill="#b1c79a"/><path d="M155 130Q206 98 173 70" fill="none" stroke="#ecdcba" stroke-width="25"/>
-    ${[0,1,2].map(i=>`<g transform="translate(${18+i*140} 7) scale(.6)"><path d="M0 128V48" stroke="#7c7351" stroke-width="8"/><path d="M-30 75Q-54 40-20 31Q-13-11 17 21Q54 12 41 53Q51 91 5 85Z" fill="#6c956c"/><path d="M0 52L-13 37M0 65L20 43" stroke="#b4c590" stroke-width="2"/></g>`).join('')}
+  const scene = stats.design === 'moonlit'
+    ? '<rect width="360" height="130" rx="14" fill="#283853"/><circle cx="296" cy="25" r="18" fill="#fff0c6"/><circle cx="305" cy="19" r="16" fill="#283853"/><path d="M30 20h3m37 17h3m57-23h3m95 23h3m100 16h3" stroke="#ffecad" stroke-width="3"/><path d="M0 93Q170 55 360 91V130H0Z" fill="#52746e"/><ellipse cx="196" cy="103" rx="65" ry="18" fill="#9cb6cb"/><path d="M165 102h60m-45 7h30" stroke="#d9e7ed"/>'
+    : stats.design === 'sunroom'
+    ? '<rect width="360" height="130" rx="14" fill="#fff0c9"/><path d="M20 93V30L180 4L340 30V93Z" fill="#d4ece2" stroke="#568277" stroke-width="5"/><path d="M100 18V93M180 4V93M260 18V93M20 47H340" stroke="#78a194" stroke-width="3"/><path d="M0 93H360V130H0Z" fill="#d6af86"/><path d="M0 111H360M90 93L75 130M180 93V130M270 93L285 130" stroke="#b58b66"/><path d="M14 87H346" stroke="#876b4d" stroke-width="8"/>'
+    : '<rect width="360" height="130" rx="14" fill="#e1ebd3"/><circle cx="306" cy="24" r="17" fill="#f4d78b"/><path d="M0 85Q86 47 187 78T360 65V130H0Z" fill="#b1c79a"/><path d="M155 130Q206 98 173 70" fill="none" stroke="#ecdcba" stroke-width="25"/><path d="M12 85V51M30 81V48M48 77V47M8 60H58" stroke="#f8edd3" stroke-width="6"/>';
+  return `<svg class="garden-scene" data-garden-design="${stats.design || 'meadow'}" viewBox="0 0 360 130" aria-hidden="true">${scene}${stats.collectedBloomCount >= 12 ? '<g data-garden-fountain="true"><ellipse cx="190" cy="103" rx="28" ry="8" fill="#6c9d9a"/><path d="M190 100V77M180 91Q177 65 190 69Q203 65 201 91" fill="none" stroke="#d1f1ed" stroke-width="3"/><path d="M173 89Q190 103 207 89" fill="#91b8b1" stroke="#507b78" stroke-width="3"/></g>' : ''}
     ${planted.slice(0,8).map((plot,i)=>`<g class="garden-flower" transform="translate(${12+i*42} ${39+(i%2)*12}) scale(.7)">${plantArt(plot,plot.stage)}</g>`).join('')}</svg>`;
 }
 
 function renderGardenWorkbench(stats) {
   const plants = stats.plants || [];
   if (!plants.some(plant => plant.id === selectedPlant)) selectedPlant = plants[0]?.id;
-  return `${renderGardenScene(stats)}<div class="garden-summary"><span><strong>${stats.seedCredits || 0}</strong> seeds to plant</span><span><strong>${stats.unlockedAreas || 1}</strong> garden areas</span></div>
+  return `${renderGardenScene(stats)}<div class="garden-summary"><span><strong>${stats.seedCredits || 0}</strong> seeds to plant</span><span><strong>${stats.unlockedAreas || 1}</strong> garden areas</span></div><button data-action="tend-flowers">Tend flowers · ${stats.readyBlooms} ready</button>
+    <section class="garden-designs" aria-label="Garden designs"><h3>Make it yours</h3><div>${stats.designs.map(design => `<button data-design="${design.id}" aria-pressed="${stats.design === design.id}" ${!design.unlocked ? 'disabled' : ''}><strong>${design.name}</strong><small>${design.unlocked ? (stats.design === design.id ? 'Selected' : 'Use design') : `${stats.collectedBloomCount}/${design.blooms} blooms collected`}</small></button>`).join('')}</div></section>
+    <section class="bloom-album" aria-label="Flower collection"><h3>Bloom collection · ${stats.collectedSpecies.length}/6</h3><p>Collect a flower at full bloom for +5 coins. Each planting rewards you once.</p><div>${plants.map(plant => `<span class="${stats.collectedSpecies.includes(plant.id) ? 'is-collected' : ''}">${stats.collectedSpecies.includes(plant.id) ? '✓ ' : ''}${plant.name}</span>`).join('')}</div><p>${stats.collectedBloomCount} lifetime blooms · ${stats.readyBlooms} ready to collect</p><p>${stats.collectedBloomCount >= 12 ? 'Fountain unlocked — a little oasis in every design.' : `Fountain landmark · ${stats.collectedBloomCount}/12 blooms collected`}</p></section>
     <p class="panel-note">1. Choose a plant. 2. Pick an empty plot (1 seed). Complete campaign or daily puzzles to earn seeds; replays do not grow plants.</p>
     <div class="plant-palette" role="group" aria-label="Choose a plant">${plants.map(plant=>`<button data-plant="${escapeAttribute(plant.id)}" aria-pressed="${selectedPlant === plant.id}"><svg viewBox="0 0 80 95" aria-hidden="true">${plantArt(plant)}</svg><span>${escapeAttribute(plant.name)}</span></button>`).join('')}</div>
-    <p class="selected-plant">Selected: <strong>${plants.find(plant => plant.id === selectedPlant)?.name}</strong> · ${stats.seedCredits > 0 ? 'Choose an empty plot below.' : 'No seeds left. Complete a campaign or daily puzzle to earn one.'}</p>
-    <div class="garden-plots" role="group" aria-label="Your garden plots">${(stats.plots || []).map(plot=>`<button class="garden-plot ${plot.plantId ? 'is-planted' : ''}" data-plot="${plot.index}"  aria-label="Plot ${plot.index+1}: ${plot.plantId ? escapeAttribute(plot.name)+' '+plot.stage : 'empty, plant '+plants.find(plant=>plant.id===selectedPlant)?.name+' for 1 seed'}"><svg viewBox="0 0 80 95" aria-hidden="true">${plot.plantId ? plantArt(plot,plot.stage) : '<ellipse cx="40" cy="73" rx="27" ry="9" fill="#ae9474"/><path d="M40 33V53M30 43H50" stroke="#5e7855" stroke-width="3" stroke-linecap="round"/>'}</svg><strong>${plot.plantId ? escapeAttribute(plot.name) : 'Plant here'}</strong><small>${plot.plantId ? plot.stage : 'Plot '+(plot.index+1)}</small></button>`).join('')}</div>
+    <p class="selected-plant">Selected: <strong>${plants.find(plant => plant.id === selectedPlant)?.name}</strong> · ${stats.seedCredits > 0 ? 'Choose an empty plot, or replace a collected flower below.' : 'No seeds left. Complete a campaign or daily puzzle to earn one.'}</p>
+    <div class="garden-plots" tabindex="-1" role="group" aria-label="Your garden plots">${(stats.plots || []).map(plot=>`<article class="garden-plot-card"><button class="garden-plot ${plot.plantId ? 'is-planted' : ''}" data-plot="${plot.index}"  aria-label="Plot ${plot.index+1}: ${plot.plantId ? escapeAttribute(plot.name)+' '+plot.stage : 'empty, plant '+plants.find(plant=>plant.id===selectedPlant)?.name+' for 1 seed'}"><svg viewBox="0 0 80 95" aria-hidden="true">${plot.plantId ? plantArt(plot,plot.stage) : '<ellipse cx="40" cy="73" rx="27" ry="9" fill="#ae9474"/><path d="M40 33V53M30 43H50" stroke="#5e7855" stroke-width="3" stroke-linecap="round"/>'}</svg><strong>${plot.plantId ? escapeAttribute(plot.name) : 'Plant here'}</strong><small>${plot.plantId ? plot.stage : 'Plot '+(plot.index+1)}</small></button>${plot.stage === 'blooming' ? `<button data-${plot.bloomCollected ? 'replant' : 'collect'}="${plot.index}" ${state.mode === 'replay' || (plot.bloomCollected && stats.seedCredits < 1) ? 'disabled' : ''}>${plot.bloomCollected ? `Replace ${plot.name} with ${plants.find(p => p.id === selectedPlant)?.name} · 1 seed` : 'Collect bloom · +5 coins'}</button>` : plot.plantId ? `<small class="growth-count">${Math.max(0, 5 - (stats.totalCompletions - plot.plantedAt))} puzzles to bloom</small>` : ''}</article>`).join('')}</div>
     <p class="garden-notice" role="status">${escapeAttribute(gardenNotice || (stats.nextPlotAt ? 'More plots open as you complete puzzles. Next expansion at '+stats.nextPlotAt+' completions.' : 'Your garden has room to flourish.'))}</p>`;
 }
 
@@ -327,6 +335,14 @@ function bindGamePanel() {
   app.querySelectorAll('[data-plant]').forEach(button => button.addEventListener('click', () => {
     selectedPlant = button.dataset.plant; gardenNotice = ''; render();
     app.querySelector(`[data-plant="${selectedPlant}"]`)?.focus();
+  }));
+  for (const action of ['collect', 'replant', 'design']) app.querySelectorAll(`[data-${action}]`).forEach(button => button.addEventListener('click', () => {
+    const value = button.dataset[action];
+    const result = action === 'collect' ? collectBloom(state, Number(value)) : action === 'replant' ? plantSeed(state, { plotIndex: Number(value), plantId: selectedPlant, replant: true }) : chooseGardenDesign(state, value);
+    state = result.state; gardenNotice = result.message;
+    if (result.status !== 'blocked') saveState(state);
+    render();
+    app.querySelector(`[data-${action === 'collect' ? 'replant' : action === 'replant' ? 'plot' : action}="${value}"]`)?.focus();
   }));
   app.querySelectorAll('[data-plot]').forEach(button => button.addEventListener('click', () => {
     const index = Number(button.dataset.plot);
@@ -707,7 +723,7 @@ function renderLevelComplete(details) {
           </div>
         </div>
         <button class="primary" data-action="continue">Continue</button>
-        ${state.mode !== 'replay' ? '<button data-action="visit-garden">Plant your seed</button>' : '<button data-action="exit-replay">Return to current level</button>'}
+        ${state.mode !== 'replay' ? '<button data-action="visit-garden">Visit garden & collect</button>' : '<button data-action="exit-replay">Return to current level</button>'}
       </div>
     </section>
   `;
@@ -763,16 +779,15 @@ function bindEvents() {
   }
 }
 
-function selectLetter(index) {
+function selectLetter(index, backtrack = false) {
   if (refreshDaily()) return false;
   if (!Number.isInteger(index) || index < 0 || index >= wheelLetters.length) {
     return false;
   }
 
-  if (selection.some((item) => item.index === index)) {
-    return false;
-  }
-  selection.push({ index, letter: wheelLetters[index] });
+  const next = extendSelection(selection, index, wheelLetters, backtrack);
+  if (next === selection) return false;
+  selection = next;
   playGardenTone('letter', state.settings, selection.length - 1);
   updateSelectionView();
   return true;
@@ -962,7 +977,7 @@ window.addEventListener('pointermove', (event) => {
   const target = document.elementFromPoint(event.clientX, event.clientY);
   const letter = target?.closest?.('.letter');
   if (letter && app.contains(letter)) {
-    const selected = selectLetter(Number(letter.dataset.index));
+    const selected = selectLetter(Number(letter.dataset.index), true);
     selectionChangedDuringSwipe = selectionChangedDuringSwipe || selected;
   } else {
     updateSwipeGuide();
@@ -996,6 +1011,10 @@ function endSwipe() {
 }
 
 function handleAction(action) {
+  if (action === 'tend-flowers') {
+    const plots = app.querySelector('.garden-plots');
+    plots?.focus(); plots?.scrollIntoView({ block: 'start' }); return;
+  }
   if (refreshDaily()) return;
   if (action === 'save-progress') { saveState(state); render(); app.querySelector('[data-action="save-progress"]')?.focus(); }
   if (action === 'download-backup') {
@@ -1100,6 +1119,9 @@ function handleSubmit() {
   state = result.state;
   message = result.message;
   selection = [];
+  isSwiping = false;
+  selectionChangedDuringSwipe = false;
+  swipePointer = null;
   feedback = createFeedback(result, word);
 
   if (state.levelIndex !== previousLevel) {
@@ -1123,7 +1145,7 @@ function createFeedback(result, word = '') {
     return { tone: 'target', label: `${word} planted` };
   }
   if (result.status === 'bonus') {
-    return { tone: 'bonus', label: `${word} +2 bonus` };
+    return { tone: 'bonus', label: result.message };
   }
   if (result.status === 'level-complete') {
     return { tone: 'complete', label: 'Garden cleared' };
@@ -1168,7 +1190,9 @@ function pulse(kind) {
 function createCompletionDetails(beforeSnapshot, afterSnapshot, resultMessage) {
   const before = beforeSnapshot.gardenStats;
   const after = afterSnapshot.gardenStats;
-  const growth = after?.unlockedPlots > before?.unlockedPlots ? 'A new seed is ready, and more garden plots have opened!' : 'A seed is ready to plant. Your garden is growing!';
+  const newBlooms = Math.max(0, after.readyBlooms - before.readyBlooms);
+  const newPlots = after.unlockedPlots - before.unlockedPlots;
+  const growth = `+1 seed · ${newBlooms} new ${newBlooms === 1 ? 'bloom' : 'blooms'}${newPlots ? ` · +${newPlots} plots` : ''}. ${newBlooms ? 'Visit your garden to collect +5 coins per bloom.' : 'Every puzzle helps your flowers grow.'}`;
   if (state.mode === 'replay') return { growth: 'A little practice, just for you. Your garden progress is safe.', context: 'Garden replay', title: 'Replay complete', message: resultMessage, cleared: beforeSnapshot.level.title, reward: '0', next: 'Your choice' };
   if (state.mode === 'daily') {
     return {

@@ -30,3 +30,11 @@ export function prepareWheel(level, random = Math.random) {
   } while (true);
   throw new Error('Puzzle has no answer-safe circular wheel order.');
 }
+
+// Only retracing the previous letter undoes a swipe; earlier indices stay unique.
+export function extendSelection(selection, index, letters, backtrack = false) {
+  if (!Number.isInteger(index) || index < 0 || index >= letters.length) return selection;
+  if (backtrack && selection.length > 1 && selection.at(-2).index === index) return selection.slice(0, -1);
+  if (selection.some(item => item.index === index)) return selection;
+  return [...selection, { index, letter: letters[index] }];
+}
