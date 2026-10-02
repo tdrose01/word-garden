@@ -51,6 +51,13 @@ export async function runProgressionRegression(browser,url) {
   await page.locator('[data-action="dismiss-garden-spotlight"]').click();assert.equal(await page.locator('.garden-unlock-spotlight').count(),0);
   await page.locator('[data-plot="0"]').click();assert.equal(await page.locator('.garden-unlock-spotlight').count(),0);
   await shot('design-unlock-dismissed');await page.locator('[data-action="close-panel"]').click();
+  await seed(designState);await page.locator('[data-action="garden"]').click();await page.locator('[data-collect="0"]').click();
+  await page.locator('[data-spotlight-design="moonlit"]').click();assert.equal((await saved()).garden.design,'moonlit');assert.equal(await page.locator('.garden-unlock-spotlight').count(),0);
+  await page.locator('[data-action="close-panel"]').click();
+  await seed(designState);await page.locator('[data-action="garden"]').click();await page.locator('[data-collect="0"]').click();await page.locator('[data-action="close-panel"]').click();
+  await page.locator('[data-action="settings"]').click();await page.locator('[data-action="reset"]').click();await page.locator('[data-action="confirm-reset"]').click();
+  await page.locator('[data-action="garden"]').click();assert.equal(await page.locator('.garden-unlock-spotlight').count(),0);assert.equal(await page.locator('[data-design="moonlit"]').isDisabled(),true);
+  await page.locator('[data-action="close-panel"]').click();
   let s=campaignAt(99);await seed(s);
   for(const word of getLevel(s).targets)await submit(page,word);
   assert.match(await page.locator('.level-complete').innerText(),/Original garden complete.*Iris unlocked/s);

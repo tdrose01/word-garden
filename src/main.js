@@ -1087,6 +1087,7 @@ function handleAction(action) {
   if (action === 'confirm-import' && pendingImport) {
     if (saveState(pendingImport)) {
       state = pendingImport; pendingImport = null; selection = []; completion = null; feedback = null;
+      inspectedPlot = null; gardenSpotlight = null; gardenNotice = '';
       wheelLetters = prepareWheel(getLevel(state)); importNotice = 'Backup imported and saved in this browser.';
     } else { importNotice = 'Import not applied. Current progress is unchanged.'; }
     render();
@@ -1141,6 +1142,9 @@ function handleAction(action) {
     wheelLetters = prepareWheel(getLevel(state));
     selection = [];
     completion = null;
+    inspectedPlot = null;
+    gardenSpotlight = null;
+    gardenNotice = '';
     panel = null;
     feedback = { tone: 'reset', label: 'Fresh start' };
     message = 'Progress reset.';
