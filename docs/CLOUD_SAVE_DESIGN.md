@@ -64,6 +64,12 @@ Official references:
 
 Cancel leaves local and cloud progress unchanged.
 
+### Recovery on a new device
+
+Before sign-in, explain that online recovery depends on retaining access to the verified email mailbox. On a new device, sign in with that same verified email and a fresh code; the verified provider subject identifies the existing cloud save, which is previewed and restored only after confirmation. This flow must be proved with the chosen provider in preview before launch.
+
+If the mailbox is lost, the game cannot restore account access merely from a claimed email address. Any provider-supported recovery must verify identity and preserve the original account subject; game support must not reassign saves or bypass that verification. Local progress and downloaded portable backups remain the recovery fallback. Changing to a new email/account does not automatically transfer cloud data. Explain these limits in the sign-in and recovery screens.
+
 ### Normal sync
 
 - Continue local writes immediately. Debounce cloud backup after local changes and retry only while the same account session is active.
