@@ -1,3 +1,4 @@
+import { runProgressionRegression } from './progression-regression.mjs';
 import { runGardenRegression } from './garden-regression.mjs';
 // Run against a local dev/preview server: node scripts/playtest-regression.mjs [URL]
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ import { loadState } from '../src/game.js';
 import { createBackup } from '../src/persistence.js';
 export async function runPlaytestRegression(browser, url) {
  await runGardenRegression(browser, url);
+ await runProgressionRegression(browser, url);
  const failures=[];
  const assertNoRuntimeFailures=()=>assert.deepEqual(failures,[], 'Feature browser runtime/network failures');
  const observedContext=async (options={}, label='feature') => {

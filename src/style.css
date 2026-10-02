@@ -1356,3 +1356,7 @@ body[data-page-scroll="true"] { overflow-y: auto; }
 .garden-plot-card > button { font-size:.78rem; min-height:44px; padding:8px; }
 .growth-count { text-align:center; }
 @media(max-width:380px) { .garden-designs > div { grid-template-columns:1fr; } }
+
+.chapter-progress { display: grid; gap: .2rem; padding: .65rem; border-radius: .8rem; background: #ffffff80; font-size: .8rem; }
+.chapter-progress p { margin: 0; line-height: 1.35; }
+.plant-palette button:disabled { opacity: .6; cursor: default; }

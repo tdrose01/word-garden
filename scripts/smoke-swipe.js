@@ -1,3 +1,4 @@
+import { getDailyObjective } from '../src/game.js';
 import { runPlaytestRegression } from './playtest-regression.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
@@ -891,12 +892,12 @@ try {
     // Every shipped campaign shape must fit without panning on a compact phone.
     const matrix = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true});
     for (let index=0; index<levels.length; index++) {
-      await matrix.page.evaluate(index => {
+      await matrix.page.evaluate(({index,version}) => {
         const save = JSON.parse(localStorage.getItem('word-garden-state'));
-        Object.assign(save, {campaignLevelVersion:3,levelIndex:index,solved:[],bonusFound:[],revealed:[]});
-        Object.assign(save.campaign,{cursor:index,completedLevels:index,bestRun:index,lastCompletedLevelId:index});
+        Object.assign(save, {campaignLevelVersion:version,levelIndex:index,solved:[],bonusFound:[],revealed:[]});
+        Object.assign(save.campaign,{cursor:index,completedLevels:index,completedIds:Array.from({length:index},(_,i)=>i),bestRun:index,lastCompletedLevelId:index});
         localStorage.setItem('word-garden-state',JSON.stringify(save));
-      },index);
+      },{index,version:LEVEL_VERSION});
       await matrix.page.reload();
       await matrix.page.waitForSelector('.letter');
       await matrix.page.evaluate(() => document.fonts.ready);
@@ -1105,16 +1106,19 @@ try {
     await living.page.locator('[data-mode="daily"]').click();
     const dailyDate=await living.page.evaluate(() => new Date().toISOString().slice(0,10));
     const dailyLevel=getDailyLevel(new Date(`${dailyDate}T00:00:00Z`));
-    const extra=[...new Set(dailyLevel.bonus)].filter(word=>!dailyLevel.targets.includes(word)).slice(0,3);
-    if(extra.length!==3) throw new Error('Daily objective lacks three bonus words');
-    const coinsBeforeDaily=await living.page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')).coins);
+    const dailySave=await living.page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')));
+    const objective=getDailyObjective(dailySave);
+    const extra=objective.kind === 'long-targets' ? dailyLevel.targets.filter(word=>word.length>=4).slice(0,2) : [...new Set(dailyLevel.bonus)].slice(0,objective.goal);
+    if(extra.length!==objective.goal) throw new Error('Daily objective is unattainable');
+    const coinsBeforeDaily=dailySave.coins;
+    const expectedCoins=coinsBeforeDaily+10+(objective.kind==='long-targets'?0:objective.goal*2);
     for(const word of extra) await submitByTap(living.page,word);
-    await expectCoins(living.page,coinsBeforeDaily+16);
+    await expectCoins(living.page,expectedCoins);
     await living.page.locator('[data-action="progress"]').click();
     if (!(await living.page.locator('.daily-objective').textContent()).includes('Reward collected')) throw new Error('Daily objective reward not displayed');
     await living.page.reload();
     await submitByTap(living.page,extra[0]);
-    await expectCoins(living.page,coinsBeforeDaily+16);
+    await expectCoins(living.page,expectedCoins);
     await living.context.close();
 
     await runPlaytestRegression(browser, url);

@@ -53,7 +53,7 @@ test('legacy campaign saves keep their actual board after multiple old 36-board 
     assert.deepEqual(state.solved, original.solved); assert.deepEqual(state.revealed, original.revealed);
     assert.deepEqual(state.bonusFound, original.bonusFound); assert.equal(state.coins, 19);
     state = finish(state);
-    assert.equal(getLevel(state).id, 6); assert.equal(state.campaignLevelVersion, 3);
+    assert.equal(getLevel(state).id, 37); assert.equal(state.campaignLevelVersion, 4);
     assert.equal(state.campaign.completedLevels, 41);
     assert.equal(createSnapshot(state).gardenStats.completedPacks, 8);
     assert.equal(createSnapshot(state).levelMap.filter(level => level.completed).length, 36);
@@ -67,7 +67,7 @@ test('legacy daily versions retain the current puzzle and switch new dates to th
     const state = loadState(storage(original));
     assert.deepEqual(getLevel(state), oldLevel);
     const rolled = loadState(storage({ ...state, daily: { ...state.daily, dateKey: '2000-01-01' } }));
-    assert.equal(rolled.daily.levelVersion, 3);
+    assert.equal(rolled.daily.levelVersion, 4);
     assert.deepEqual(getLevel(rolled), getDailyLevel());
   }
   assert.equal(versionTwoDailyLevels.length, 41);
@@ -94,6 +94,7 @@ test('starter seed, placement, growth, plot expansion and duplicate planting sur
 
 test('daily three-bonus reward is reachable and paid once across completion and reload', () => {
   let state = setMode(fresh(), 'daily');
+  state.daily.levelVersion = 3; // Frozen legacy three-bonus objective.
   const bonuses = getBuildableDictionaryWords(getLevel(state).letters).filter(word => !getLevel(state).targets.includes(word));
   const coins = state.coins;
   for (const word of bonuses.slice(0, 3)) state = submitWord(word, state).state;

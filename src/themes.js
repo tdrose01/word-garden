@@ -61,13 +61,13 @@ const SEEDS = {
 // Display copy describes scenery without naming the seed answer. The source
 // remains metadata for designers; UI must never render sourceWord as a clue.
 const SCENE_COPY = {
-  seedlings: ['Fresh beginnings', 'Young leaves and softly tended beds.'],
+  seedlings: ['Fresh beginnings', 'Young leaves brighten freshly prepared beds.'],
   brook: ['Beside the water', 'Cool water passes rounded rocks and leafy banks.'],
   woodland: ['Under the canopy', 'Layered boughs shelter a quiet winding path.'],
   flowers: ['Soft color', 'Soft hues brighten a leafy clearing.'],
   sunrise: ['First light', 'Warm light spreads across the horizon.'],
   canyon: ['Sunlit cliffs', 'Warm rock layers rise above a quiet valley.'],
-  moonlight: ['Quiet evening', 'A gentle lunar glow settles over the landscape.'],
+  moonlight: ['Quiet evening', 'Soft lunar light settles over the landscape.'],
   alpine: ['Cool horizons', 'Pale mountains rise into clear, crisp air.'],
   harvest: ['Golden season', 'Warm leaves and golden fields signal a changing season.']
 };

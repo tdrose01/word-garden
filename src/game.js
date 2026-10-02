@@ -1,6 +1,7 @@
+import { getChapterProgress } from './progression.js';
 import { getGardenView } from './garden.js';
 import { isDictionaryWord } from './dictionary.js';
-import { buildGrid, getDailyLevel, getDateKey, levels, legacyLevels, versionTwoLevels, LEVEL_VERSION } from './levels.js';
+import { buildGrid, getDailyLevel, getDateKey, levels, legacyLevels, versionTwoLevels, getCampaignCatalog, ORIGINAL_LEVEL_COUNT, LEVEL_VERSION } from './levels.js';
 import { canBuildWord, normalizeWord } from './word-utils.js';
 
 export { canBuildWord };
@@ -39,7 +40,7 @@ export function getLevel(state) {
     return getDailyLevel(new Date(`${progress.dateKey}T00:00:00.000Z`), progress.levelVersion);
   }
 
-  const catalog = state.campaignLevelVersion === 1 ? legacyLevels : state.campaignLevelVersion === 2 ? versionTwoLevels : levels;
+  const catalog = getCampaignCatalog(state.campaignLevelVersion);
   return catalog[getCampaignPuzzleIndex(state)] || catalog[0];
 }
 
@@ -87,7 +88,8 @@ export function submitWord(input, state) {
     }
 
     const solved = [...progress.solved, word];
-    let nextState = updateProgress(state, { ...progress, solved });
+    let nextState = claimDailyObjective(updateProgress(state, { ...progress, solved }));
+    const objectiveReward = nextState.coins - state.coins;
 
     if (solved.length === level.targets.length) {
       const reward = getCompletionReward(state);
@@ -97,11 +99,11 @@ export function submitWord(input, state) {
       return {
         state: nextState,
         status: 'level-complete',
-        message: completionMessage(state.mode, reward, completedLevelNumber, nextState)
+        message: completionMessage(state.mode, reward + objectiveReward, completedLevelNumber, nextState, state)
       };
     }
 
-    return { state: nextState, status: 'target', message: 'Nice find.' };
+    return { state: nextState, status: 'target', message: objectiveReward ? 'Daily goal complete! +10 coins.' : 'Nice find.' };
   }
 
   if (isDictionaryWord(word)) {
@@ -112,17 +114,9 @@ export function submitWord(input, state) {
     const replay = state.mode === 'replay';
     let nextState = updateProgress({ ...state, coins: state.coins + (replay ? 0 : 2) },
       { ...progress, bonusFound: [...progress.bonusFound, word] });
-    let objectiveReward = 0;
-    if (state.mode === 'daily') {
-      const objective = getDailyObjective(nextState);
-      if (objective.complete && !objective.claimed) {
-        objectiveReward = objective.reward;
-        const daily = getDailyProgress(nextState);
-        nextState = { ...nextState, coins: nextState.coins + objectiveReward,
-          daily: { ...daily, objectiveClaimed: true },
-          dailyStats: { ...getDailyStats(nextState), objectiveDates: [...getDailyStats(nextState).objectiveDates, daily.dateKey] } };
-      }
-    }
+    const beforeClaim = nextState.coins;
+    nextState = claimDailyObjective(nextState);
+    const objectiveReward = nextState.coins - beforeClaim;
     return { state: nextState, status: 'bonus', message: replay ? 'Replay bonus found.' : objectiveReward ? `Daily goal complete! +${2 + objectiveReward} coins.` : 'Bonus word. +2 coins.' };
   }
 
@@ -246,7 +240,7 @@ function advanceLevel(state) {
   }
 
   const completedLevelNumber = getCampaignProgress(state).completedLevels + 1;
-  const campaign = completeCampaignProgress(getCampaignProgress(state), completedLevelNumber);
+  const campaign = completeCampaignProgress(getCampaignProgress(state), completedLevelNumber, state.campaignLevelVersion);
 
   return {
     ...state,
@@ -266,7 +260,13 @@ function advanceLevel(state) {
 
 function normalizeState(state, random) {
   state = { ...state, campaignLevelVersion: state.campaignLevelVersion || 1 };
-  const campaign = getCampaignProgress(state, random);
+  let campaign = getCampaignProgress(state, random);
+  // Empty completed v3 loops can move directly. An active old board remains pinned.
+  if (state.campaignLevelVersion === 3 && campaign.completedIds.length === ORIGINAL_LEVEL_COUNT &&
+      !['solved', 'bonusFound', 'revealed'].some(key => state[key]?.length) && !state.rescueUsed) {
+    state.campaignLevelVersion = LEVEL_VERSION;
+    campaign = { ...campaign, cursor: ORIGINAL_LEVEL_COUNT };
+  }
 
   return {
     ...state,
@@ -322,6 +322,7 @@ function createCampaignStats(state) {
     Math.floor(campaign.completedLevels / CAMPAIGN_MILESTONE_EVERY) * CAMPAIGN_MILESTONE_EVERY + CAMPAIGN_MILESTONE_EVERY;
 
   return {
+    chapter: getChapterProgress({ ...state, campaign }),
     currentLevel: pathIndex + 1,
     totalLevels,
     completedLevels: campaign.completedLevels,
@@ -386,13 +387,13 @@ function getCampaignProgress(state, random) {
   const campaign = state.campaign || {};
   const fallback = state.startRandomizerVersion && isUnclearedCampaignState(state) && !Number.isFinite(campaign.completedLevels) ? 0 : state.levelIndex;
   const completedLevels = Math.max(0, Math.floor(Number.isFinite(campaign.completedLevels) ? campaign.completedLevels : Number.isFinite(fallback) ? fallback : 0));
-  const oldCatalog = state.campaignLevelVersion === 1 || state.campaignLevelVersion === 2;
-  const catalogLength = oldCatalog ? legacyLevels.length : levels.length;
+  const catalog = getCampaignCatalog(state.campaignLevelVersion);
+  const catalogLength = catalog.length;
   const cursor = Number.isInteger(campaign.cursor) && campaign.cursor >= 0 && campaign.cursor < catalogLength ? campaign.cursor : completedLevels % catalogLength;
+  // Historical counters only prove clears inside their historical catalog.
   const completedIds = Array.isArray(campaign.completedIds)
-    ? [...new Set(campaign.completedIds.filter(index => Number.isInteger(index) && index >= 0 && index < levels.length))]
-    : Array.from({ length: Math.min(completedLevels, catalogLength) }, (_, index) => index);
-  const catalog = oldCatalog ? legacyLevels : levels;
+    ? [...new Set(campaign.completedIds.filter(index => Number.isInteger(index) && index >= 0 && index < catalogLength))]
+    : Array.from({ length: Math.min(completedLevels, catalogLength, ORIGINAL_LEVEL_COUNT) }, (_, index) => index);
   const ends = catalog.flatMap((level, index) => catalog[index + 1]?.pack !== level.pack ? [index + 1] : []);
   const completedPacks = Number.isInteger(campaign.completedPacks) && campaign.completedPacks >= 0 ? campaign.completedPacks : Math.floor(completedLevels / catalogLength) * ends.length + ends.filter(end => end <= completedLevels % catalogLength).length;
   return {
@@ -413,15 +414,25 @@ function isUnclearedCampaignState(state) {
   );
 }
 
-function completeCampaignProgress(campaign, completedLevelNumber) {
+function completeCampaignProgress(campaign, completedLevelNumber, version) {
   const completedLevels = campaign.completedLevels + 1;
+  const completedIds = [...new Set([...campaign.completedIds, campaign.cursor])];
+  const chapter = getChapterProgress({ campaign: { completedIds } });
+  const firstMissing = (start, end) => Array.from({ length: end - start }, (_, i) => start + i).find(i => !completedIds.includes(i));
+  let cursor = (campaign.cursor + 1) % levels.length;
+  if (!chapter.secondUnlocked) {
+    cursor = firstMissing(0, ORIGINAL_LEVEL_COUNT) ?? 0;
+  } else if (!chapter.pergolaUnlocked) {
+    cursor = firstMissing(ORIGINAL_LEVEL_COUNT, levels.length);
+  }
+  const catalog = getCampaignCatalog(version);
 
   return {
     ...campaign,
     completedLevels,
-    cursor: (campaign.cursor + 1) % levels.length,
-    completedIds: [...new Set([...campaign.completedIds, campaign.cursor])],
-    completedPacks: campaign.completedPacks + (levels[campaign.cursor + 1]?.pack !== levels[campaign.cursor].pack ? 1 : 0),
+    cursor,
+    completedIds,
+    completedPacks: campaign.completedPacks + (catalog[campaign.cursor + 1]?.pack !== catalog[campaign.cursor].pack ? 1 : 0),
     bestRun: Math.max(campaign.bestRun, completedLevels),
     lastCompletedLevelId: completedLevelNumber
   };
@@ -565,14 +576,19 @@ function updateProgress(state, progress) {
   };
 }
 
-function completionMessage(mode, reward, completedLevelNumber, state) {
+function completionMessage(mode, reward, completedLevelNumber, state, previous) {
   if (mode === 'replay') return 'Replay complete. Your journey is safe.';
   if (mode === 'daily') {
     return `Daily complete. +${reward} coins.`;
   }
 
   const campaign = getCampaignProgress(state);
-  const nextLevelNumber = createCampaignStats(state).currentLevel;
+  const stats = createCampaignStats(state);
+  const nextLevelNumber = stats.currentLevel;
+  if (stats.chapter.secondUnlocked && !getChapterProgress({ campaign: getCampaignProgress(previous) }).secondUnlocked)
+    return `Original garden complete! Second Garden and Iris unlocked. +${reward} coins. Next: Level ${nextLevelNumber}.`;
+  if (stats.chapter.pergolaUnlocked && !getChapterProgress({ campaign: getCampaignProgress(previous) }).pergolaUnlocked)
+    return `Second Garden complete! Pergola unlocked. +${reward} coins. Replay any clearing or continue the path.`;
   return campaign.completedLevels % CAMPAIGN_MILESTONE_EVERY === 0
     ? `Level ${completedLevelNumber} complete! Milestone bonus: +${reward} coins. Next: Level ${nextLevelNumber}.`
     : `Level ${completedLevelNumber} complete! +${reward} coins. Next: Level ${nextLevelNumber}.`;
@@ -591,12 +607,12 @@ export function updateSettings(state, changes) {
 
 function storedGarden(garden) {
   return { plots: garden.plots.filter(plot => plot.plantId).map(({ index, plantId, plantedAt, bloomCollected }) => ({ index, plantId, plantedAt, bloomCollected })),
-    seedsSpent: garden.seedsSpent, collectedBloomCount: garden.collectedBloomCount, collectedSpecies: garden.collectedSpecies, design: garden.design };
+    seedsSpent: garden.seedsSpent, collectedBloomCount: garden.collectedBloomCount, collectedSpecies: garden.collectedSpecies, albumRewardClaimed: garden.albumRewardClaimed, design: garden.design };
 }
 export function plantSeed(state, { plotIndex, plantId, replant = false } = {}) {
   const garden = createGardenStats(state);
   if (state.mode === 'replay') return { state, status: 'blocked', message: 'Return to your journey to tend the garden.' };
-  if (!Number.isInteger(plotIndex) || plotIndex < 0 || plotIndex >= garden.unlockedPlots || !garden.plants.some(plant => plant.id === plantId))
+  if (!Number.isInteger(plotIndex) || plotIndex < 0 || plotIndex >= garden.unlockedPlots || !garden.plants.some(plant => plant.id === plantId && plant.unlocked))
     return { state, status: 'blocked', message: 'Choose an unlocked plot and a plant.' };
   const plot = garden.plots[plotIndex];
   if (plot.plantId && !(replant && plot.bloomCollected)) return { state, status: 'blocked', message: 'Collect this bloom before replanting.' };
@@ -642,9 +658,31 @@ export function exitReplay(state) {
   return { ...state, mode: 'campaign', replay: null };
 }
 
-function getDailyObjective(state) {
+export function getDailyObjective(state) {
   const daily = getDailyProgress(state);
-  const found = daily.bonusFound.length;
-  return { found, goal: 3, reward: 10, complete: found >= 3,
+  const day = Math.floor(Date.parse(`${daily.dateKey}T00:00:00Z`) / 86400000);
+  const kind = daily.levelVersion < 4 ? 'legacy-bonus' : ['one-bonus', 'two-bonus', 'long-targets'][((day % 3) + 3) % 3];
+  const goal = kind === 'legacy-bonus' ? 3 : kind === 'one-bonus' ? 1 : 2;
+  const level = getDailyLevel(new Date(`${daily.dateKey}T00:00:00Z`), daily.levelVersion);
+  const found = kind === 'long-targets' ? new Set(daily.solved.filter(word => level.targets.includes(word) && word.length >= 4)).size : new Set(daily.bonusFound).size;
+  const label = kind === 'long-targets' ? 'Solve 2 required words of at least 4 letters' : `Find ${goal} ${goal === 1 ? 'bonus word' : 'distinct bonus words'}`;
+  return { kind, label, found, goal, reward: 10, complete: found >= goal,
     claimed: Boolean(daily.objectiveClaimed || getDailyStats(state).objectiveDates.includes(daily.dateKey)) };
+}
+function claimDailyObjective(state) {
+  if (state.mode !== 'daily') return state;
+  const objective = getDailyObjective(state);
+  if (!objective.complete || objective.claimed) return state;
+  const daily = getDailyProgress(state);
+  const stats = getDailyStats(state);
+  return { ...state, coins: state.coins + objective.reward,
+    daily: { ...daily, objectiveClaimed: true },
+    dailyStats: { ...stats, objectiveDates: [...stats.objectiveDates, daily.dateKey] } };
+}
+export function claimCollectionReward(state) {
+  const garden = createGardenStats(state);
+  if (state.mode === 'replay' || !garden.albumComplete || garden.albumRewardClaimed)
+    return { state, status: 'blocked', message: 'Collect all six original flowers to claim this reward once.' };
+  return { state: { ...state, coins: state.coins + 30, garden: { ...storedGarden(garden), albumRewardClaimed: true } },
+    status: 'collection', message: 'Original flower collection complete! +30 coins.' };
 }
