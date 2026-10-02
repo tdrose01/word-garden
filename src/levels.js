@@ -1,3 +1,4 @@
+import { secondGardenContent, expandedDailyContent } from './progression-content.js';
 import { newCampaignContent, newDailyContent } from './content.js';
 export const legacyLevels = [
   {
@@ -329,7 +330,7 @@ export const legacyDailyLevels = [
 ];
 
 // Keep the original boards available solely to finish saves made before version 2.
-export const LEVEL_VERSION = 3;
+export const LEVEL_VERSION = 4;
 export const versionTwoLevels = legacyLevels.map((level, index) => {
   const extraCount = index < 12 ? 0 : index < 24 ? 1 : 2;
   const extra = [...level.bonus].sort((a, b) => b.length - a.length).slice(0, extraCount);
@@ -343,16 +344,26 @@ export const versionTwoDailyLevels = [...legacyDailyLevels, ...versionTwoLevels.
 
 // Existing identifiers remain stable. New chapters introduce short familiar
 // families before six- and eight-letter families; occasional short rests help.
-export const levels = [...versionTwoLevels, ...newCampaignContent.map((level, index) => ({
+export const versionThreeLevels = [...versionTwoLevels, ...newCampaignContent.map((level, index) => ({
   ...level, id: index + 37, title: `Clearing ${index + 1}`,
   pack: ['Orchard Walk', 'Kitchen Garden', 'Evening Lights', 'River Journey', 'Changing Seasons', 'Blossom Trail', 'Living Woodland'][Math.floor(index / 10)],
   difficulty: level.letters.length <= 5 ? 'Gentle' : level.letters.length <= 7 ? 'Growing' : 'Challenge'
 }))];
-export const dailyLevels = newDailyContent;
+export const versionThreeDailyLevels = newDailyContent;
+export const ORIGINAL_LEVEL_COUNT = versionThreeLevels.length;
+export const levels = [...versionThreeLevels, ...secondGardenContent.map((level, index) => ({
+  ...level, id: ORIGINAL_LEVEL_COUNT + index + 1, title: `Second clearing ${index + 1}`,
+  pack: ['First Crossing', 'Quiet Courtyard', 'New Horizons', 'Evening Retreat'][Math.floor(index / 6)],
+  difficulty: 'Growing'
+}))];
+export const dailyLevels = [...versionThreeDailyLevels, ...expandedDailyContent];
+export function getCampaignCatalog(version = LEVEL_VERSION) {
+  return version === 1 ? legacyLevels : version === 2 ? versionTwoLevels : version === 3 ? versionThreeLevels : levels;
+}
 
 export function getDailyLevel(date = new Date(), version = LEVEL_VERSION) {
   const key = getDateKey(date);
-  const pool = version === 1 ? legacyDailyLevels : version === 2 ? versionTwoDailyLevels : dailyLevels;
+  const pool = version === 1 ? legacyDailyLevels : version === 2 ? versionTwoDailyLevels : version === 3 ? versionThreeDailyLevels : dailyLevels;
   const seed = version === 1
     ? Array.from(key).reduce((total, char) => total + char.charCodeAt(0), 0)
     : Math.floor(Date.parse(`${key}T00:00:00.000Z`) / 86400000);

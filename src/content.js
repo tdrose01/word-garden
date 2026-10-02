@@ -1,3 +1,4 @@
+import { progressionWords } from './progression-content.js';
 // Hand-authored English word families. Targets are deliberately curated;
 // this file is original project data, not a third-party dictionary extract.
 // Each row: wheel | required words | extra accepted words | scenery.
@@ -121,4 +122,4 @@ function parseRows(text, prefix) {
 }
 export const newCampaignContent = parseRows(CAMPAIGN, 'grove');
 export const newDailyContent = parseRows(DAILY, 'daily');
-export const contentWords = [...newCampaignContent, ...newDailyContent].flatMap(level => [...level.targets, ...level.bonus]);
+export const contentWords = [...progressionWords, ...[...newCampaignContent, ...newDailyContent].flatMap(level => [...level.targets, ...level.bonus])];

@@ -11,6 +11,7 @@ import { playGardenTone } from './sensory.js';
 import {
   plantSeed,
   collectBloom,
+  claimCollectionReward,
   chooseGardenDesign,
   updateSettings,
   startReplay,
@@ -212,7 +213,7 @@ function renderCompactProgress(snapshot) {
   const stats = snapshot.campaignStats;
   const percent = state.mode === 'daily' ? Math.round(snapshot.progress.solved.length / snapshot.level.targets.length * 100) : stats.pathPercent;
   return `<button class="compact-progress" data-action="progress" aria-label="View detailed progress">
-    <span>${state.mode === 'daily' ? `Daily · ${snapshot.dailyStats.streak}d · bonus ${Math.min(snapshot.dailyObjective?.found || 0, snapshot.dailyObjective?.goal || 3)}/${snapshot.dailyObjective?.goal || 3}` : `${stats.pack.title} · ${stats.currentLevel}/${stats.totalLevels}`}</span>
+    <span>${state.mode === 'daily' ? `Daily · ${snapshot.dailyStats.streak}d · goal ${Math.min(snapshot.dailyObjective.found, snapshot.dailyObjective.goal)}/${snapshot.dailyObjective.goal}` : `${stats.pack.title} · ${stats.currentLevel}/${stats.totalLevels}`}</span>
     <span class="campaign-meter"><span style="width:${percent}%"></span></span><span>${percent}% <span aria-hidden="true">›</span></span>
   </button>`;
 }
@@ -225,17 +226,20 @@ function renderGardenScene(stats = {}) {
     ? '<rect width="360" height="130" rx="14" fill="#fff0c9"/><path d="M20 93V30L180 4L340 30V93Z" fill="#d4ece2" stroke="#568277" stroke-width="5"/><path d="M100 18V93M180 4V93M260 18V93M20 47H340" stroke="#78a194" stroke-width="3"/><path d="M0 93H360V130H0Z" fill="#d6af86"/><path d="M0 111H360M90 93L75 130M180 93V130M270 93L285 130" stroke="#b58b66"/><path d="M14 87H346" stroke="#876b4d" stroke-width="8"/>'
     : '<rect width="360" height="130" rx="14" fill="#e1ebd3"/><circle cx="306" cy="24" r="17" fill="#f4d78b"/><path d="M0 85Q86 47 187 78T360 65V130H0Z" fill="#b1c79a"/><path d="M155 130Q206 98 173 70" fill="none" stroke="#ecdcba" stroke-width="25"/><path d="M12 85V51M30 81V48M48 77V47M8 60H58" stroke="#f8edd3" stroke-width="6"/>';
   return `<svg class="garden-scene" data-garden-design="${stats.design || 'meadow'}" viewBox="0 0 360 130" aria-hidden="true">${scene}${stats.collectedBloomCount >= 12 ? '<g data-garden-fountain="true"><ellipse cx="190" cy="103" rx="28" ry="8" fill="#6c9d9a"/><path d="M190 100V77M180 91Q177 65 190 69Q203 65 201 91" fill="none" stroke="#d1f1ed" stroke-width="3"/><path d="M173 89Q190 103 207 89" fill="#91b8b1" stroke="#507b78" stroke-width="3"/></g>' : ''}
+    ${stats.landmarks?.butterfly ? '<g data-garden-butterfly="true" transform="translate(62 40)"><path d="M0 0Q-28-25-23-4Q-28 17-2 7Q24 17 23-4Q28-25 0 0" fill="#c59dc8" stroke="#7e668d" stroke-width="2"/><path d="M0-6V13M0-6L-5-12M0-6L5-12" stroke="#685477" stroke-width="2"/></g>' : ''}
+    ${stats.landmarks?.gazebo ? '<g data-garden-gazebo="true"><path d="M274 62L309 39L344 62Z" fill="#789f93" stroke="#52776b" stroke-width="2"/><path d="M281 65V105M337 65V105M309 65V105M277 104H341M279 91H339" stroke="#aa8964" stroke-width="4"/></g>' : ''}
+    ${stats.landmarks?.pergola ? '<g data-garden-pergola="true"><path d="M111 104V54M157 104V54M102 56H166M99 49H169M109 46V62M121 46V62M133 46V62M145 46V62M157 46V62" stroke="#ae8660" stroke-width="4"/><path d="M111 72Q116 50 141 51T165 50" fill="none" stroke="#6d9269" stroke-width="5"/></g>' : ''}
     ${planted.slice(0,8).map((plot,i)=>`<g class="garden-flower" transform="translate(${12+i*42} ${39+(i%2)*12}) scale(.7)">${plantArt(plot,plot.stage)}</g>`).join('')}</svg>`;
 }
 
 function renderGardenWorkbench(stats) {
   const plants = stats.plants || [];
-  if (!plants.some(plant => plant.id === selectedPlant)) selectedPlant = plants[0]?.id;
+  if (!plants.some(plant => plant.id === selectedPlant && plant.unlocked)) selectedPlant = plants.find(plant => plant.unlocked)?.id;
   return `${renderGardenScene(stats)}<div class="garden-summary"><span><strong>${stats.seedCredits || 0}</strong> seeds to plant</span><span><strong>${stats.unlockedAreas || 1}</strong> garden areas</span></div><button data-action="tend-flowers">Tend flowers · ${stats.readyBlooms} ready</button>
     <section class="garden-designs" aria-label="Garden designs"><h3>Make it yours</h3><div>${stats.designs.map(design => `<button data-design="${design.id}" aria-pressed="${stats.design === design.id}" ${!design.unlocked ? 'disabled' : ''}><strong>${design.name}</strong><small>${design.unlocked ? (stats.design === design.id ? 'Selected' : 'Use design') : `${stats.collectedBloomCount}/${design.blooms} blooms collected`}</small></button>`).join('')}</div></section>
-    <section class="bloom-album" aria-label="Flower collection"><h3>Bloom collection · ${stats.collectedSpecies.length}/6</h3><p>Collect a flower at full bloom for +5 coins. Each planting rewards you once.</p><div>${plants.map(plant => `<span class="${stats.collectedSpecies.includes(plant.id) ? 'is-collected' : ''}">${stats.collectedSpecies.includes(plant.id) ? '✓ ' : ''}${plant.name}</span>`).join('')}</div><p>${stats.collectedBloomCount} lifetime blooms · ${stats.readyBlooms} ready to collect</p><p>${stats.collectedBloomCount >= 12 ? 'Fountain unlocked — a little oasis in every design.' : `Fountain landmark · ${stats.collectedBloomCount}/12 blooms collected`}</p></section>
+    <section class="bloom-album" aria-label="Flower collection"><h3>Bloom collection · ${stats.originalSpeciesCount}/6 original flowers</h3><p>Collect a flower at full bloom for +5 coins. Each planting rewards you once.</p><div>${plants.map(plant => `<span class="${stats.collectedSpecies.includes(plant.id) ? 'is-collected' : ''}">${stats.collectedSpecies.includes(plant.id) ? '✓ ' : ''}${plant.name}</span>`).join('')}</div>${stats.albumComplete ? `<button data-action="claim-collection" ${stats.albumRewardClaimed || state.mode === 'replay' ? 'disabled' : ''}>${stats.albumRewardClaimed ? 'Collection reward claimed' : 'Claim collection reward · +30 coins'}</button>` : '<p>Collect all six original flowers for a one-time +30 coin reward.</p>'}<p>${stats.collectedBloomCount} lifetime blooms · ${stats.readyBlooms} ready to collect</p><p>${stats.collectedBloomCount >= 12 ? 'Fountain unlocked — a little oasis in every design.' : `Fountain landmark · ${stats.collectedBloomCount}/12 blooms collected`}</p><p>${stats.landmarks.butterfly ? 'Butterfly ornament unlocked' : `Butterfly ornament · ${stats.collectedBloomCount}/24 blooms`}</p><p>${stats.landmarks.gazebo ? 'Gazebo unlocked' : `Gazebo · ${stats.collectedBloomCount}/48 blooms`}</p><p>${stats.landmarks.pergola ? 'Pergola unlocked — Second Garden complete.' : 'Complete all 24 Second Garden clearings to unlock a pergola.'}</p></section>
     <p class="panel-note">1. Choose a plant. 2. Pick an empty plot (1 seed). Complete campaign or daily puzzles to earn seeds; replays do not grow plants.</p>
-    <div class="plant-palette" role="group" aria-label="Choose a plant">${plants.map(plant=>`<button data-plant="${escapeAttribute(plant.id)}" aria-pressed="${selectedPlant === plant.id}"><svg viewBox="0 0 80 95" aria-hidden="true">${plantArt(plant)}</svg><span>${escapeAttribute(plant.name)}</span></button>`).join('')}</div>
+    <div class="plant-palette" role="group" aria-label="Choose a plant">${plants.map(plant=>`<button data-plant="${escapeAttribute(plant.id)}" aria-pressed="${selectedPlant === plant.id}" ${!plant.unlocked ? 'disabled' : ''}><svg viewBox="0 0 80 95" aria-hidden="true">${plantArt(plant)}</svg><span>${escapeAttribute(plant.name)}${!plant.unlocked ? ' · clear the original path' : ''}</span></button>`).join('')}</div>
     <p class="selected-plant">Selected: <strong>${plants.find(plant => plant.id === selectedPlant)?.name}</strong> · ${stats.seedCredits > 0 ? 'Choose an empty plot, or replace a collected flower below.' : 'No seeds left. Complete a campaign or daily puzzle to earn one.'}</p>
     <div class="garden-plots" tabindex="-1" role="group" aria-label="Your garden plots">${(stats.plots || []).map(plot=>`<article class="garden-plot-card"><button class="garden-plot ${plot.plantId ? 'is-planted' : ''}" data-plot="${plot.index}"  aria-label="Plot ${plot.index+1}: ${plot.plantId ? escapeAttribute(plot.name)+' '+plot.stage : 'empty, plant '+plants.find(plant=>plant.id===selectedPlant)?.name+' for 1 seed'}"><svg viewBox="0 0 80 95" aria-hidden="true">${plot.plantId ? plantArt(plot,plot.stage) : '<ellipse cx="40" cy="73" rx="27" ry="9" fill="#ae9474"/><path d="M40 33V53M30 43H50" stroke="#5e7855" stroke-width="3" stroke-linecap="round"/>'}</svg><strong>${plot.plantId ? escapeAttribute(plot.name) : 'Plant here'}</strong><small>${plot.plantId ? plot.stage : 'Plot '+(plot.index+1)}</small></button>${plot.stage === 'blooming' ? `<button data-${plot.bloomCollected ? 'replant' : 'collect'}="${plot.index}" ${state.mode === 'replay' || (plot.bloomCollected && stats.seedCredits < 1) ? 'disabled' : ''}>${plot.bloomCollected ? `Replace ${plot.name} with ${plants.find(p => p.id === selectedPlant)?.name} · 1 seed` : 'Collect bloom · +5 coins'}</button>` : plot.plantId ? `<small class="growth-count">${Math.max(0, 5 - (stats.totalCompletions - plot.plantedAt))} puzzles to bloom</small>` : ''}</article>`).join('')}</div>
     <p class="garden-notice" role="status">${escapeAttribute(gardenNotice || (stats.nextPlotAt ? 'More plots open as you complete puzzles. Next expansion at '+stats.nextPlotAt+' completions.' : 'Your garden has room to flourish.'))}</p>`;
@@ -244,7 +248,7 @@ function renderGardenWorkbench(stats) {
 function renderObjectives(snapshot) {
   const objective = snapshot.dailyObjective;
   if (!objective) return '';
-  return `<section class="daily-objective" aria-label="Daily objective"><span class="eyebrow">A little extra today</span><h3>Find ${objective.goal} bonus words</h3><p>${objective.found}/${objective.goal} found · ${objective.claimed ? 'Reward collected' : '+'+objective.reward+' coins'}</p><progress value="${Math.min(objective.found,objective.goal)}" max="${objective.goal}" aria-label="Daily bonus-word objective"></progress></section>`;
+  return `<section class="daily-objective" aria-label="Daily objective"><span class="eyebrow">A little extra today</span><h3>${escapeAttribute(objective.label)}</h3><p>${objective.found}/${objective.goal} found · ${objective.claimed ? 'Reward collected' : '+'+objective.reward+' coins'}</p><progress value="${Math.min(objective.found,objective.goal)}" max="${objective.goal}" aria-label="Daily objective progress"></progress></section>`;
 }
 
 function renderLevelMap(snapshot) {
@@ -332,6 +336,12 @@ function bindGamePanel() {
     render();
     app.querySelector(`[data-setting="${key}"]`)?.focus();
   }));
+  app.querySelector('[data-action="claim-collection"]')?.addEventListener('click', () => {
+    const result = claimCollectionReward(state);
+    state = result.state; gardenNotice = result.message;
+    if (result.status !== 'blocked') saveState(state);
+    render(); app.querySelector('[data-action="claim-collection"]')?.focus();
+  });
   app.querySelectorAll('[data-plant]').forEach(button => button.addEventListener('click', () => {
     selectedPlant = button.dataset.plant; gardenNotice = ''; render();
     app.querySelector(`[data-plant="${selectedPlant}"]`)?.focus();
@@ -561,6 +571,7 @@ function renderCampaignStats(snapshot) {
 
   return `
     <section class="campaign-strip" aria-label="Campaign progress">
+      <div class="chapter-progress"><strong>${stats.chapter.secondUnlocked ? 'Second Garden' : 'Original path'}</strong><span>${stats.chapter.secondUnlocked ? `${stats.chapter.secondCleared}/${stats.chapter.secondTotal} unique clearings` : `${stats.chapter.originalCleared}/${stats.chapter.originalTotal} unique clearings`}</span><p>${stats.chapter.pergolaUnlocked ? 'Both chapters complete. Enjoy your pergola and replay any clearing.' : stats.chapter.secondUnlocked ? safeSceneText('Next: Pergola after all 24 Second Garden clearings.', snapshot.level, 'Next: Complete the second chapter for its garden landmark.') : safeSceneText('Next: Second Garden and Iris after all 100 original clearings.', snapshot.level, 'Next: Complete the original path for a new chapter and flower.')}</p></div>
       <div class="campaign-strip__meta">
         <span>${stats.pack.title}</span>
         <strong>Level ${stats.currentLevel}/${stats.totalLevels}</strong>
@@ -1209,7 +1220,7 @@ function createCompletionDetails(beforeSnapshot, afterSnapshot, resultMessage) {
   return {
     growth,
     context: beforeSnapshot.campaignStats.pack.title,
-    title: `Level ${beforeSnapshot.campaignStats.currentLevel} complete`,
+    title: !beforeSnapshot.campaignStats.chapter.secondUnlocked && afterSnapshot.campaignStats.chapter.secondUnlocked ? 'Original garden complete!' : !beforeSnapshot.campaignStats.chapter.pergolaUnlocked && afterSnapshot.campaignStats.chapter.pergolaUnlocked ? 'Second Garden complete!' : `Level ${beforeSnapshot.campaignStats.currentLevel} complete`,
     message: resultMessage,
     cleared: `Level ${beforeSnapshot.campaignStats.currentLevel}`,
     reward: getRewardFromMessage(resultMessage),

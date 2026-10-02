@@ -328,6 +328,7 @@ test('campaign stats report pack progress and path loops from level index', () =
   const snapshot = createSnapshot({
     mode: 'campaign',
     levelIndex: levels.length + 6,
+    campaign: { completedLevels: levels.length + 6, cursor: 6, completedIds: levels.map((_, i) => i) },
     coins: 40,
     solved: [],
     bonusFound: [],

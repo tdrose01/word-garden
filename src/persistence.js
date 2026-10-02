@@ -1,7 +1,8 @@
 import { loadState, getLevel } from './game.js';
-import { levels, legacyLevels, LEVEL_VERSION, getDailyLevel } from './levels.js';
+import { levels, legacyLevels, getCampaignCatalog, LEVEL_VERSION, getDailyLevel } from './levels.js';
 import { canBuildWord } from './word-utils.js';
 import { isDictionaryWord } from './dictionary.js';
+import { getChapterProgress } from './progression.js';
 import { plants, gardenDesigns } from './garden.js';
 
 export const MAX_BACKUP_BYTES = 1024 * 1024;
@@ -45,7 +46,7 @@ export function parseBackup(text) {
     mode: v => ['campaign','daily','replay'].includes(v), levelIndex: integer, campaignLevelVersion: version,
     coins: integer, ...progress,
     settings: v => fields(v,{sound:bool,haptics:bool},['sound','haptics']),
-    garden: v => fields(v,{plots: list => Array.isArray(list) && list.length <= 48 && new Set(list.map(p=>p?.index)).size === list.length && list.every(p=>fields(p,{index:v=>integer(v)&&v<48,plantId:v=>plants.some(p=>p.id===v),plantedAt:integer,bloomCollected:bool},['index','plantId','plantedAt'])),seedsSpent:integer,collectedBloomCount:integer,collectedSpecies:list=>Array.isArray(list)&&new Set(list).size===list.length&&list.every(id=>plants.some(p=>p.id===id)),design:id=>gardenDesigns.some(d=>d.id===id)},['plots']),
+    garden: v => fields(v,{plots: list => Array.isArray(list) && list.length <= 48 && new Set(list.map(p=>p?.index)).size === list.length && list.every(p=>fields(p,{index:v=>integer(v)&&v<48,plantId:v=>plants.some(p=>p.id===v),plantedAt:integer,bloomCollected:bool},['index','plantId','plantedAt'])),seedsSpent:integer,albumRewardClaimed:bool,collectedBloomCount:integer,collectedSpecies:list=>Array.isArray(list)&&new Set(list).size===list.length&&list.every(id=>plants.some(p=>p.id===id)),design:id=>gardenDesigns.some(d=>d.id===id)},['plots']),
     campaign: v => fields(v,{completedLevels:integer,cursor:integer,completedIds:v=>Array.isArray(v)&&new Set(v).size===v.length&&v.every(i=>integer(i)&&i<levels.length),completedPacks:integer,bestRun:integer,lastCompletedLevelId:integer,puzzleOrder:v=>Array.isArray(v)&&v.length<=levels.length&&new Set(v).size===v.length&&v.every(i=>integer(i)&&i<levels.length)},['completedLevels']),
     daily: v => fields(v,{...progress,dateKey:date,levelVersion:version,objectiveClaimed:bool},['dateKey','solved','bonusFound','revealed','completed']),
     dailyStats: v => fields(v,{streak:integer,totalCompletions:integer,bestStreak:integer,lastCompletedDate:v=>v===''||date(v),reward:integer,objectiveDates:v=>Array.isArray(v)&&v.length<=10000&&new Set(v).size===v.length&&v.every(date)}),
@@ -53,16 +54,23 @@ export function parseBackup(text) {
     startRandomizerVersion: integer
   }, ['mode','levelIndex','coins','solved','bonusFound','revealed']);
   if (s.mode === 'replay' && !s.replay) fail();
-  const catalogLength = (s.campaignLevelVersion || 1) < 3 ? legacyLevels.length : levels.length;
+  const catalogLength = getCampaignCatalog(s.campaignLevelVersion || 1).length;
   if (s.campaign?.cursor !== undefined && s.campaign.cursor >= catalogLength) fail();
+  if (s.campaign?.completedIds?.some(id => id >= catalogLength)) fail();
   const normalized = loadState({getItem:()=>JSON.stringify(s)});
-  checkBoard(s, getLevel({...normalized,mode:'campaign'}));
+  checkBoard(s, getLevel({...s, campaignLevelVersion: s.campaignLevelVersion || 1, mode:'campaign'}));
   if (s.daily) checkBoard(s.daily,getDailyLevel(new Date(s.daily.dateKey+'T00:00:00Z'),s.daily.levelVersion || 1));
   if (s.replay) checkBoard(s.replay,levels[s.replay.levelIndex]);
+  const chapter = getChapterProgress(normalized);
+  if (s.campaignLevelVersion === LEVEL_VERSION && !chapter.secondUnlocked &&
+      (s.campaign?.cursor >= chapter.originalTotal || s.campaign?.completedIds?.some(id => id >= chapter.originalTotal))) fail();
   const completions = normalized.campaign.completedLevels + normalized.dailyStats.totalCompletions;
   if (s.garden?.plots.some(p=>p.index>=Math.min(48,4+Math.floor(completions/5)*4)||p.plantedAt>completions) || (s.garden?.plots.length || 0)>1+completions) fail();
   if (s.garden) {
     const g = s.garden;
+    const chapter = getChapterProgress(normalized);
+    if ((g.albumRewardClaimed && !plants.filter(p => !p.chapter).every(p => g.collectedSpecies?.includes(p.id))) ||
+      (!chapter.secondUnlocked && (g.plots.some(p => p.plantId === 'iris') || g.collectedSpecies?.includes('iris')))) fail();
     const spent = g.seedsSpent ?? g.plots.length;
     const count = g.collectedBloomCount ?? 0;
     if (spent < g.plots.length || spent > 1 + completions || count > spent || (g.collectedSpecies?.length || 0) > count ||

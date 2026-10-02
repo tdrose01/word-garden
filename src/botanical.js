@@ -7,6 +7,7 @@ export function plantArt(plant = {}, stage = 'blooming') {
   if (stage === 'growing') return `<ellipse cx="40" cy="86" rx="24" ry="5" fill="#34573a22"/>${stem}<path d="M42 36Q29 15 42 14Q54 16 42 36" fill="${color}"/>`;
   let bloom;
   if (/lavender|sage/i.test(id)) bloom = [0,1,2,3,4].map(i => `<ellipse cx="${38+i%2*7}" cy="${12+i*5}" rx="6" ry="4" fill="${color}"/>`).join('');
+  else if (/iris/i.test(id)) bloom = `<g data-iris-art="true" transform="translate(42 28)"><path d="M0 2Q-21-27-10-30Q2-27 0-3Q3-29 14-27Q25-22 5 2Q29 1 20 19Q9 24 3 6Q-2 31-13 21Q-21 9-3 3Z" fill="${color}" stroke="#ece3fa" stroke-width="1.2"/><path d="M-3 4L-9 16M3 4L12 13" stroke="#edc968" stroke-width="3" stroke-linecap="round"/></g>`;
   else if (/fern/i.test(id)) bloom = [0,1,2,3,4].map(i => `<path d="M41 ${22+i*9}Q${12+i*4} ${9+i*9} ${18+i*4} ${25+i*9}L41 ${28+i*9}Q${72-i*3} ${7+i*9} ${66-i*3} ${25+i*9}Z" fill="#649166"/>`).join('');
   else bloom = `<g transform="translate(42 26)">${Array.from({length:8},(_,i)=>`<ellipse cy="-12" rx="7" ry="13" transform="rotate(${i*45})" fill="${color}" stroke="#fff6e8" stroke-width=".6"/>`).join('')}<circle r="7" fill="#e9b956"/><circle cx="-2" cy="-2" r="2" fill="#fff1b6"/></g>`;
   return `<ellipse cx="40" cy="86" rx="24" ry="5" fill="#34573a22"/>${stem}${bloom}`;
