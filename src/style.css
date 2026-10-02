@@ -1354,8 +1354,30 @@ body[data-page-scroll="true"] { overflow-y: auto; }
 .garden-plot-card { display:flex; flex-direction:column; gap:7px; min-width:0; }
 .garden-plot-card .garden-plot { width:100%; flex:1; }
 .garden-plot-card > button { font-size:.78rem; min-height:44px; padding:8px; }
-.growth-count { text-align:center; }
+.plot-growth { display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 7px; align-items:center; padding:7px; border-radius:10px; background:#eef0df; color:#38573d; }
+.plot-growth span { padding:3px 6px; border-radius:999px; background:#dbe5c9; font-size:.66rem; font-weight:900; line-height:1.1; }
+.plot-growth progress { width:100%; min-width:0; height:8px; accent-color:#668d5d; }
+.plot-growth strong { grid-column:1 / -1; text-align:center; font-size:.72rem; line-height:1.2; }
+.plot-growth--ready { background:#fff0c7; color:#604d25; }
+.plot-growth--ready span { background:#f4cf72; }
+.plot-growth--collected { background:#e6e1ef; color:#554a67; }
+.plot-growth--collected span { background:#cec2df; }
+.garden-unlock-spotlight { display:grid; gap:8px; padding:14px; border:2px solid #c69b42; border-radius:16px; background:linear-gradient(145deg,#fff6cf,#edf3dc); box-shadow:0 12px 26px #5d4c2520; }
+.garden-unlock-spotlight > span, .level-complete__unlock > span { color:#735c27; font-size:.68rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+.garden-unlock-spotlight h3, .level-complete__unlock h3 { margin:0; font-family:'Fraunces',serif; color:#254832; }
+.garden-unlock-spotlight p { margin:0; line-height:1.35; }
+.garden-unlock-spotlight > div { display:flex; flex-wrap:wrap; gap:8px; }
+.garden-unlock-spotlight button { min-height:44px; flex:1 1 130px; }
+.level-complete__unlock { display:grid; gap:6px; padding:10px; border:2px solid #c69b42; border-radius:12px; background:linear-gradient(145deg,#fff6cf,#edf3dc); text-align:left; }
+.level-complete__unlock h3 { font-size:1.1rem; }
+.level-complete__unlock ul { margin:0; padding-left:1.1rem; color:#385846; font-weight:800; }
+.level-complete__unlock p { font-size:.78rem; }
 @media(max-width:380px) { .garden-designs > div { grid-template-columns:1fr; } }
+@media(max-width:380px) {
+  .garden-plots { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .plot-growth { padding:6px 5px; }
+  .plot-growth span, .plot-growth strong { font-size:.64rem; }
+}
 
 .chapter-progress { display: grid; gap: .2rem; padding: .65rem; border-radius: .8rem; background: #ffffff80; font-size: .8rem; }
 .chapter-progress p { margin: 0; line-height: 1.35; }
