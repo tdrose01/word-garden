@@ -71,6 +71,14 @@ Cancel leaves local and cloud progress unchanged.
 - A stale revision returns `409 Conflict` with the current cloud snapshot. The client stops automatic uploads and asks the player to choose. It never applies “furthest progress,” maximum coins, or a field-level merge.
 - A transient failure leaves the local save intact and marked pending. Reconnect fetches current cloud state before retrying.
 
+### Import while signed in
+
+- Pause automatic uploads before showing the existing validated import preview. Cancelling leaves local progress, pending writes, and cloud progress unchanged.
+- Before applying an import, cancel or drain outstanding writes and advance the session operation generation so late responses cannot mark the imported state as backed up. Preserve the displaced local save as a portable recovery backup.
+- Confirming the import replaces only this device's local save. Display `Saved on this device — online backup needs your choice`; do not upload it automatically.
+- Fetch the account's latest cloud revision and compare the imported save with it. Require the same explicit `Use this device`, `Use cloud save`, or `Cancel` choice, including recovery copies, even if this account had previously enabled automatic backup. Cancel keeps the imported local save and existing cloud save with automatic uploads paused.
+- Resume automatic uploads only after that choice is confirmed and the matching account/session generation is still active. A revision conflict reopens the comparison; switching accounts reruns first-sign-in flow.
+
 ### Sign-out and account switching
 
 - Sign-out cancels/ignores in-flight requests, clears provider session data, and leaves the last playable state on the device as an explicit guest copy. The UI states that anyone using the device can play that copy and offers `Remove account progress from this device` only after a downloaded recovery backup is available.
@@ -90,7 +98,7 @@ cloud_saves(
   save_json text not null,
   saved_at text not null,
   device_id text not null,
-  request_id text not null unique
+  request_id text not null
 )
 
 cloud_save_versions(
@@ -100,7 +108,21 @@ cloud_save_versions(
   saved_at text not null,
   primary key(account_id, revision)
 )
+
+cloud_save_requests(
+  account_id text not null,
+  request_id text not null,
+  payload_hash text not null,
+  accepted_revision integer not null,
+  response_json text not null,
+  accepted_at text not null,
+  primary key(account_id, request_id)
+)
 ```
+
+The request ledger is account-scoped and independent of the current save row and recovery history. In one atomic operation, check the ledger first: replay its original accepted response for an identical request payload, even after later revisions exist; reject reuse of the same ID with a different payload. Only an unseen ID proceeds to revision comparison and an atomic save/history/ledger write. A replay acknowledges that operation's accepted revision, not that the device holds the latest cloud save; clients must refresh before subsequent sync when newer revisions may exist.
+
+Retain accepted request records for the account's lifetime in v1, pending owner approval of retention and storage limits. Account/data deletion removes the ledger as well as save/history data. If a bounded retention policy is chosen later, define an explicit expired-request protocol before pruning; an expired ID must never be treated as a fresh write. Test replay of request A after request B, mismatched-payload ID reuse, concurrent duplicate requests, and equal IDs in different accounts before provider rollout.
 
 Keep at least the prior accepted revision for server-side recovery. A later retention limit can be chosen after measuring save size. The current import ceiling is 1 MiB, so the API must reject larger bodies before parsing.
 
@@ -110,7 +132,7 @@ Endpoints, all `Cache-Control: no-store`:
 - `PUT /api/cloud-save` → conditional write with `baseRevision` and `requestId`; returns `201/200`, `409`, `413`, `422`, or auth/rate-limit errors.
 - `DELETE /api/cloud-save` is not part of sign-out. Account/data deletion needs a separate, re-authenticated confirmation design.
 
-The server validates Clerk tokens, derives `account_id` from the verified token subject, checks issuer/audience/expiry, validates the full backup with server-compatible schema code, and uses one D1 transaction/batch for history plus compare-and-swap. Logs exclude save JSON, email, tokens, and puzzle contents.
+The server validates Clerk tokens, derives `account_id` from the verified token subject, checks issuer/audience/expiry, validates the full backup with server-compatible schema code, and uses an atomic D1 save/history/request-ledger operation with compare-and-swap. The provider proof of concept must demonstrate rollback on a stale-write race and concurrent identical requests before this SQL sketch becomes executable schema. Logs exclude save JSON, email, tokens, and puzzle contents.
 
 ## Conflict and reward safety
 
