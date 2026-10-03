@@ -144,8 +144,30 @@ async function hashWrite(write) {
 async function readJson(request) {
   const type = request.headers.get('content-type') || '';
   if (!type.toLowerCase().includes('application/json')) return { error: 'Content-Type must be application/json.', status: 415 };
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).length > MAX_REQUEST_BYTES) return { error: 'Cloud save is too large.', status: 413 };
+  const tooLarge = { error: 'Cloud save is too large.', status: 413 };
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (declaredLength > MAX_REQUEST_BYTES) return tooLarge;
+  const reader = request.body?.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let raw = '';
+  if (reader) {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > MAX_REQUEST_BYTES) {
+          await reader.cancel();
+          return tooLarge;
+        }
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
+  }
   try {
     return { value: validateWrite(JSON.parse(raw)) };
   } catch {
@@ -249,4 +271,4 @@ export async function onRequestPut(context) {
   return jsonResponse({ ok: true, revision: nextRevision, requestId: write.requestId }, write.baseRevision === 0 ? 201 : 200, access.origin);
 }
 
-export const __test = { cloudSnapshotFromRow, getAllowedOrigin, hashWrite, validateWrite };
+export const __test = { cloudSnapshotFromRow, getAllowedOrigin, hashWrite, readJson, validateWrite };

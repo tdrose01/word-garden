@@ -58,3 +58,28 @@ test('database rows return a versioned client snapshot without account identity'
   assert.equal(snapshot.accountId, undefined);
   assert.equal(snapshot.backup.format, 'word-garden-backup');
 });
+
+
+test('cloud Function stops oversized streamed bodies before reading their remainder', async () => {
+  let cancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1024 * 1024 + 16 * 1024 + 1));
+    },
+    cancel() { cancelled = true; }
+  });
+  const request = new Request('https://word-garden-6fl.pages.dev/api/cloud-save', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body, duplex: 'half'
+  });
+  assert.equal((await __test.readJson(request)).status, 413);
+  assert.equal(cancelled, true);
+});
+
+test('cloud Function parses a bounded valid streamed write', async () => {
+  const intent = createWriteIntent({ state: state(), baseRevision: 0, requestId: 'request_12345678',
+    deviceId: 'device-1', savedAt: '2026-10-03T00:00:00Z' });
+  const request = new Request('https://word-garden-6fl.pages.dev/api/cloud-save', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intent)
+  });
+  assert.equal((await __test.readJson(request)).value.requestId, intent.requestId);
+});
