@@ -1,3 +1,5 @@
+import { parseCloudSnapshot } from './cloud-save.js';
+
 const DEFAULT_ENDPOINT = '/api/cloud-save';
 
 export class CloudSaveApiError extends Error {
@@ -43,11 +45,29 @@ export function createCloudSaveApi({ getToken, fetchImpl = fetch, endpoint = DEF
     }
 
     const payload = await responseBody(response);
-    if (response.ok) return payload;
+    const invalidResponse = () => new CloudSaveApiError(
+      'Online backup returned an invalid response. Local progress is unchanged.',
+      { status: response.status, code: 'invalid' }
+    );
+    const validateSnapshot = snapshot => {
+      try { parseCloudSnapshot(snapshot); } catch { throw invalidResponse(); }
+      return snapshot;
+    };
+    if (response.ok) {
+      if (method === 'GET') {
+        if (response.status !== 200 || !payload?.snapshot) throw invalidResponse();
+        validateSnapshot(payload.snapshot);
+      } else if (![200, 201].includes(response.status) || payload?.ok !== true ||
+          payload.requestId !== body?.requestId || !Number.isSafeInteger(payload.revision) ||
+          payload.revision !== body?.baseRevision + 1) {
+        throw invalidResponse();
+      }
+      return payload;
+    }
     if (response.status === 404 && method === 'GET') return null;
     if (response.status === 409 && payload?.snapshot) {
       throw new CloudSaveApiError('Cloud progress changed on another device.', {
-        status: 409, code: 'conflict', snapshot: payload.snapshot
+        status: 409, code: 'conflict', snapshot: validateSnapshot(payload.snapshot)
       });
     }
     const code = response.status === 401 ? 'signed-out' :
