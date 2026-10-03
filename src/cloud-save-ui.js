@@ -28,15 +28,10 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
   let applyingRemote = false;
   let deviceId;
   let localChangeTimer;
-  let remoteDetails = null;
+  let sessionGeneration = 0;
+  let actionGeneration = 0;
   const transport = injectedApi || createCloudSaveApi({ getToken: () => auth.getToken(expectedSubject) });
-  const api = {
-    async get() { remoteDetails = await transport.get(); return remoteDetails; },
-    async put(write) {
-      try { return await transport.put(write); }
-      catch (error) { if (error.snapshot) remoteDetails = error.snapshot; throw error; }
-    }
-  };
+  const api = transport;
   const preserveBackup = (backup, reason) => {
     parseBackup(backup);
     try { getStorage().setItem(CLOUD_RECOVERY_KEY, JSON.stringify({ backup, reason, savedAt: new Date().toISOString() })); }
@@ -48,8 +43,13 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
     if (!deviceId) { deviceId = createId(); getStorage().setItem('word-garden-cloud-device', deviceId); }
     flow = createCloudSaveFlow({
       auth: {
-        async signIn() { const session = await auth.signIn(); expectedSubject = session.subject; return session; },
-        async signOut() { expectedSubject = null; await auth.signOut(); }
+        async signIn() {
+          const generation = ++sessionGeneration;
+          const session = await auth.signIn();
+          if (generation === sessionGeneration) expectedSubject = session.subject;
+          return session;
+        },
+        async signOut() { ++sessionGeneration; expectedSubject = null; await auth.signOut(); }
       }, api, readLocal,
       writeLocal(value) {
         applyingRemote = true;
@@ -63,6 +63,7 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
     });
     auth.subscribe?.(subject => {
       if (expectedSubject && subject !== expectedSubject) {
+        ++sessionGeneration; ++actionGeneration; active = false;
         expectedSubject = null; clearTimeout(localChangeTimer);
         flow.invalidateSession(); onChange();
       }
@@ -83,7 +84,7 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
       const checking = active || view.phase === 'checking' || (view.phase === 'waiting' && !view.retryPending);
       const panel = renderCloudSavePanel(view);
       const comparing = ['confirm-upload', 'confirm-restore', 'conflict'].includes(view.phase);
-      const remote = comparing ? remoteDetails : null;
+      const remote = comparing ? flow?.getComparisonSnapshot() : null;
       const date = remote?.savedAt ? new Date(remote.savedAt) : null;
       const metadata = date && !Number.isNaN(date.getTime()) ? `<p>Backup device: ${remote.deviceId === deviceId ? 'This device' : 'Another device'}. Saved <time data-cloud-time datetime="${escape(remote.savedAt)}">${escape(date.toLocaleString())}</time>.</p>` : '';
       return `<div data-cloud-save-ui>${panel}${comparing ? progressDetails('This device', readLocal()) + progressDetails('Online backup', remote?.backup?.state) + metadata : ''}<p>Sign-in compares first. After your choice, new progress backs up automatically. Importing a JSON backup pauses online backup. Guest play remains available.</p><p>Clerk handles sign-in; Word Garden stores your puzzle, daily, replay, garden and settings progress for backup. Use an account you can recover and an email inbox you can access. On a shared device, sign out when finished. Signing out keeps the playable local copy in this browser.</p>${notice ? '<p role="status">Online backup is paused after importing. Check online backup before choosing again.</p>' : ''}${!checking && view.phase !== 'signed-out' ? '<button data-cloud-action="check">Check online backup</button>' : ''}${view.subject && !panel.includes('data-cloud-action="sign-out"') ? '<button data-cloud-action="sign-out">Sign out</button>' : ''}${view.retryPending ? '<button data-cloud-action="retry">Retry backup</button>' : ''}${recovery() ? '<button data-cloud-action="download-recovery">Download previous save</button>' : ''}<p data-cloud-ui-error role="status"></p></div>`;
@@ -96,6 +97,7 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
           const action = button.dataset.cloudAction;
           if (active && !['sign-out', 'download-recovery'].includes(action)) return;
           if (action === 'download-recovery') { const backup = recovery(); if (backup) download(backup); return; }
+          const generation = ++actionGeneration;
           active = true;
           try {
             const current = initializeFlow();
@@ -106,12 +108,13 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
             else operation = current.choose(button.dataset.cloudChoice);
             onChange(); await operation;
           } catch (error) {
+            if (generation !== actionGeneration) return;
             active = false; onChange();
             const status = root.ownerDocument.querySelector('[data-cloud-ui-error]');
             if (status) status.textContent = error.message || 'Online backup failed. Local progress is unchanged.';
             return;
-          } finally { active = false; }
-          onChange();
+          } finally { if (generation === actionGeneration) active = false; }
+          if (generation === actionGeneration) onChange();
         });
       }
     },
@@ -125,6 +128,7 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
       }, 600);
     },
     pauseForImport() {
+      ++sessionGeneration; ++actionGeneration; active = false;
       clearTimeout(localChangeTimer); notice = 'imported';
       flow?.pauseForImport();
       preserveBackup(createBackup(readLocal()), 'before-json-import');

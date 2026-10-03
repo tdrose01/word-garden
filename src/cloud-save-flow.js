@@ -176,7 +176,8 @@ export function createCloudSaveFlow({ auth, api, readLocal, writeLocal, localIsM
     await auth.signOut();
     return view(current);
   }
-  return { choose, getView: () => view(current), signIn, signOut, invalidateSession,
+  return { choose, getView: () => view(current),
+    getComparisonSnapshot: () => cloudSnapshot ? structuredClone(cloudSnapshot) : null, signIn, signOut, invalidateSession,
     localChanged, pauseForImport, importPause: pauseForImport, retry };
 }
 

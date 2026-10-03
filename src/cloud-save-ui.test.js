@@ -60,3 +60,55 @@ test('failed recovery persistence blocks local restore', async () => {
   assert.equal(h.ui.getView().phase, 'error');
   assert.ok(!h.calls.includes('restore'));
 });
+
+test('late previous-account reads and write conflicts cannot change current comparison details', async () => {
+  for (const delayedOperation of ['get', 'put']) {
+    const local = loadState({ getItem: () => null }, () => 0);
+    const oldSave = createCloudSnapshot({ state: { ...local, coins: 80 }, revision: 1, deviceId: 'old', savedAt: '2020-01-01T00:00:00.000Z' });
+    const newSave = createCloudSnapshot({ state: { ...local, coins: 90 }, revision: 2, deviceId: 'new', savedAt: '2026-10-03T00:00:00.000Z' });
+    let subject = 'account_old';
+    let finishOld;
+    let started;
+    const pending = new Promise(resolve => { started = resolve; });
+    const storage = new Map();
+    const ui = createCloudSaveUI({ enabled: true,
+      auth: { signIn: async () => ({ subject }), signOut: async () => {} },
+      api: {
+        get() {
+          if (subject === 'account_old' && delayedOperation === 'get') {
+            started(); return new Promise(resolve => { finishOld = () => resolve(oldSave); });
+          }
+          return Promise.resolve(subject === 'account_old' ? oldSave : newSave);
+        },
+        put() {
+          started(); return new Promise((resolve, reject) => {
+            finishOld = () => reject(Object.assign(new Error('Conflict'), { code: 'conflict', snapshot: oldSave }));
+          });
+        }
+      },
+      readLocal: () => structuredClone(local), writeLocal() {}, onChange() {}, createId: () => 'request_test_id',
+      storage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) }
+    });
+    function press(dataset) {
+      let handler;
+      ui.bind({ querySelectorAll: () => [{ dataset, addEventListener(name, callback) { handler = callback; } }],
+        ownerDocument: { querySelector: () => ({ textContent: '' }) } });
+      return handler();
+    }
+    let oldOperation = press({ cloudAction: 'sign-in' });
+    if (delayedOperation === 'put') {
+      await oldOperation;
+      oldOperation = press({ cloudChoice: 'keep-local' });
+    }
+    await pending;
+    await press({ cloudAction: 'sign-out' });
+    subject = 'account_new';
+    await press({ cloudAction: 'sign-in' });
+    assert.equal(ui.getView().subject, 'account_new');
+    assert.match(ui.render(), /datetime="2026-10-03/);
+    finishOld(); await oldOperation;
+    assert.equal(ui.getView().subject, 'account_new');
+    assert.match(ui.render(), /datetime="2026-10-03/);
+    assert.doesNotMatch(ui.render(), /2020-01-01/);
+  }
+});
