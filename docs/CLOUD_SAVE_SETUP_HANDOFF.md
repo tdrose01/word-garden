@@ -34,6 +34,14 @@ Use preview/test resources only:
 
 Current free allowances checked during design review were Clerk Hobby up to 50,000 monthly retained users, and D1 Free at 5 million rows read/day, 100,000 rows written/day, and 5 GB stored. Recheck provider pricing at action time.
 
+## Abuse limits and data lifecycle
+
+The Function limits each verified account to 30 writes and 120 reads per minute, and a connecting IP to 240 total requests per minute. It returns 429 with a retry delay and preserves local progress. Limiter failures return 503. Indexed minute counters expire on subsequent requests; only a SHA-256 IP hash is retained for at most two minute buckets, with no plaintext IP in the table or logs.
+
+Save, recovery-history, and request-ledger retention is account lifetime in the initial preview. Account/data deletion must remove all three account-scoped tables and associated rate counters; sign-out performs no deletion. Before enabling production, publish the privacy/retention policy and provide the reviewed, verified-account deletion route. Never enable production with an untested deletion or provider recovery path.
+
+Local SQLite tests exercise the actual migration and handler SQL for account isolation, concurrent stale writes, duplicate requests, A-after-B retry replay, history, and atomic rollback. CI uses Node 22 for its built-in SQLite module (development/test minimum 22.13). These tests supplement the mandatory real D1/Clerk preview drill.
+
 ## Data sent and stored
 
 Clerk receives:

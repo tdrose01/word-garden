@@ -184,6 +184,37 @@ async function authenticate(context) {
   return { origin, accountId: auth.accountId, database: context.env.CLOUD_SAVES };
 }
 
+const RATE_COUNTER_SQL = `INSERT INTO cloud_save_rate_limits (limiter_key, bucket, requests)
+  VALUES (?1, ?2, 1) ON CONFLICT(limiter_key, bucket)
+  DO UPDATE SET requests = cloud_save_rate_limits.requests + 1 RETURNING requests`;
+
+async function enforceRateLimit(context, access) {
+  const bucket = Math.floor(Date.now() / 60_000);
+  const ip = context.request.headers.get('cf-connecting-ip') || 'unknown';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ip));
+  const ipHash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+  const method = context.request.method;
+  const accountLimit = method === 'PUT' ? 30 : 120;
+  try {
+    const results = await access.database.batch([
+      access.database.prepare(RATE_COUNTER_SQL).bind(`account:${access.accountId}:${method}`, bucket),
+      access.database.prepare(RATE_COUNTER_SQL).bind(`ip:${ipHash}`, bucket),
+      access.database.prepare('DELETE FROM cloud_save_rate_limits WHERE bucket < ?1').bind(bucket - 1)
+    ]);
+    const accountCount = results?.[0]?.results?.[0]?.requests;
+    const ipCount = results?.[1]?.results?.[0]?.requests;
+    if (!Number.isSafeInteger(accountCount) || !Number.isSafeInteger(ipCount)) throw new Error('Rate limiter unavailable');
+    if (accountCount > accountLimit || ipCount > 240) {
+      const response = jsonResponse({ error: 'Online backup is busy. Progress is safe on this device. Retry shortly.' }, 429, access.origin);
+      response.headers.set('retry-after', String(60 - Math.floor(Date.now() / 1000) % 60));
+      return response;
+    }
+    return null;
+  } catch {
+    return jsonResponse({ error: 'Online backup is temporarily unavailable. Progress is safe on this device.' }, 503, access.origin);
+  }
+}
+
 async function currentSave(database, accountId) {
   return database.prepare(
     'SELECT revision, save_json, saved_at, device_id FROM cloud_saves WHERE account_id = ?1'
@@ -206,6 +237,8 @@ export async function onRequestOptions({ request, env }) {
 export async function onRequestGet(context) {
   const access = await authenticate(context);
   if (access.response) return access.response;
+  const limited = await enforceRateLimit(context, access);
+  if (limited) return limited;
   const row = await currentSave(access.database, access.accountId);
   if (!row) return jsonResponse({ error: 'No cloud save.' }, 404, access.origin);
   return jsonResponse({ snapshot: cloudSnapshotFromRow(row) }, 200, access.origin);
@@ -214,6 +247,8 @@ export async function onRequestGet(context) {
 export async function onRequestPut(context) {
   const access = await authenticate(context);
   if (access.response) return access.response;
+  const limited = await enforceRateLimit(context, access);
+  if (limited) return limited;
   const parsed = await readJson(context.request);
   if (parsed.error) return jsonResponse({ error: parsed.error }, parsed.status, access.origin);
   const write = parsed.value;
@@ -271,4 +306,4 @@ export async function onRequestPut(context) {
   return jsonResponse({ ok: true, revision: nextRevision, requestId: write.requestId }, write.baseRevision === 0 ? 201 : 200, access.origin);
 }
 
-export const __test = { cloudSnapshotFromRow, getAllowedOrigin, hashWrite, readJson, validateWrite, verifySession };
+export const __test = { cloudSnapshotFromRow, getAllowedOrigin, hashWrite, readJson, validateWrite, verifySession, enforceRateLimit, RATE_COUNTER_SQL };

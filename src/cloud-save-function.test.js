@@ -122,3 +122,29 @@ test('cloud Function verifies signature, issuer, audience, expiry and authorized
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test('cloud Function enforces account and IP budgets and fails closed if counters fail', async () => {
+  const keys = [];
+  let counts = [1, 1];
+  const database = {
+    prepare(sql) { return { bind(...values) { keys.push({ sql, values }); return { sql, values }; } }; },
+    async batch() { return counts.map(requests => ({ results: [{ requests }] })); }
+  };
+  const request = new Request('https://word-garden-6fl.pages.dev/api/cloud-save', {
+    method: 'PUT', headers: { 'cf-connecting-ip': '203.0.113.1' }
+  });
+  const access = { database, accountId: 'verified_user', origin: 'https://word-garden-6fl.pages.dev' };
+  assert.equal(await __test.enforceRateLimit({ request }, access), null);
+  assert.equal(keys[0].values[0], 'account:verified_user:PUT');
+  assert.match(keys[1].values[0], /^ip:[a-f0-9]{64}$/);
+  assert.ok(!JSON.stringify(keys).includes('203.0.113.1'));
+  counts = [31, 1];
+  const limited = await __test.enforceRateLimit({ request }, access);
+  assert.equal(limited.status, 429);
+  assert.ok(Number(limited.headers.get('retry-after')) > 0);
+  counts = [1, 241];
+  assert.equal((await __test.enforceRateLimit({ request }, access)).status, 429);
+  counts = [];
+  assert.equal((await __test.enforceRateLimit({ request }, access)).status, 503);
+});

@@ -27,3 +27,13 @@ CREATE TABLE IF NOT EXISTS cloud_save_versions (
 
 CREATE INDEX IF NOT EXISTS cloud_save_versions_account_saved
   ON cloud_save_versions (account_id, saved_at DESC);
+
+-- Ephemeral abuse counters; old minute buckets are removed on each request.
+-- IP addresses are hashed by the Function and never stored in plaintext.
+CREATE TABLE IF NOT EXISTS cloud_save_rate_limits (
+  limiter_key TEXT NOT NULL,
+  bucket INTEGER NOT NULL,
+  requests INTEGER NOT NULL CHECK (requests > 0),
+  PRIMARY KEY (limiter_key, bucket)
+);
+CREATE INDEX IF NOT EXISTS cloud_save_rate_limits_bucket ON cloud_save_rate_limits(bucket);
