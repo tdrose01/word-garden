@@ -8,7 +8,7 @@ const fresh = () => loadState({ getItem: () => null });
 const now = '2026-10-02T12:00:00.000Z';
 const snapshot = (state, revision = 1) => createCloudSnapshot({ state, revision, savedAt: now, deviceId: 'other-device' });
 
-function harness({ local = fresh(), cloud = null, meaningful = false, delayedGet = null } = {}) {
+function harness({ local = fresh(), cloud = null, meaningful = false, delayedGet = null, put = null } = {}) {
   let localState = structuredClone(local);
   const writes = [];
   const recoveries = [];
@@ -17,17 +17,17 @@ function harness({ local = fresh(), cloud = null, meaningful = false, delayedGet
     auth: { signIn: async () => ({ subject: 'user_1' }), signOut: async () => { signOuts++; } },
     api: {
       get: delayedGet || (async () => cloud),
-      put: async write => { writes.push(write); return { revision: write.baseRevision + 1 }; }
+      put: async write => { writes.push(write); if (put) return put(write); cloud = createCloudSnapshot({ state: write.backup.state, revision: write.baseRevision + 1, savedAt: now, deviceId: 'this-device' }); return { revision: write.baseRevision + 1 }; }
     },
     readLocal: () => structuredClone(localState),
     writeLocal: state => { localState = structuredClone(state); },
     localIsMeaningful: () => meaningful,
     preserveBackup: (backup, label) => recoveries.push({ backup, label }),
-    createRequestId: () => 'request_12345678',
+    createRequestId: () => `request_${writes.length}_12345678`,
     deviceId: 'this-device',
     now: () => now
   });
-  return { flow, writes, recoveries, getLocal: () => localState, getSignOuts: () => signOuts };
+  return { flow, writes, recoveries, getLocal: () => localState, setLocal: state => { localState = structuredClone(state); }, setCloud: state => { cloud = state; }, getSignOuts: () => signOuts };
 }
 
 test('first sign-in previews a local-only save without uploading it', async () => {
@@ -92,4 +92,95 @@ test('panel renders explicit accessible choices without automatic-merge language
   assert.match(html, /Use online backup/);
   assert.match(html, /Cancel/);
   assert.doesNotMatch(html, /merge/i);
+});
+
+
+test('autosync requires explicit consent and imports pause it', async () => {
+  const { flow, writes, getLocal, setLocal } = harness();
+  await flow.signIn();
+  const changed = getLocal(); changed.coins = 42; setLocal(changed);
+  await flow.localChanged(); assert.equal(writes.length, 0);
+  await flow.choose('keep-local'); assert.equal(writes.length, 1);
+  changed.coins = 43; setLocal(changed); await flow.localChanged();
+  assert.equal(writes.length, 2); assert.equal(writes[1].baseRevision, 1);
+  flow.pauseForImport(); changed.coins = 44; setLocal(changed);
+  await flow.localChanged(); assert.equal(writes.length, 2);
+  assert.equal(flow.getView().phase, 'paused');
+});
+
+test('same initial saves require explicit opt-in for subsequent changes', async () => {
+  const local = fresh();
+  const { flow, writes, setLocal } = harness({ local, cloud: snapshot(local) });
+  await flow.signIn(); assert.equal(flow.getView().autoBackup, false);
+  assert.match(renderCloudSavePanel(flow.getView()), /Enable online backup/);
+  const changed = structuredClone(local); changed.coins = 42; setLocal(changed);
+  await flow.localChanged(); assert.equal(writes.length, 0);
+  await flow.choose('keep-local'); assert.equal(writes.length, 1);
+});
+
+test('local edits made during an upload are backed up as a subsequent revision', async () => {
+  let finish;
+  let count = 0;
+  const first = new Promise(resolve => { finish = resolve; });
+  const { flow, writes, getLocal, setLocal } = harness({ put: async write => {
+    if (++count === 1) return first;
+    return { revision: write.baseRevision + 1 };
+  } });
+  await flow.signIn();
+  const uploading = flow.choose('keep-local');
+  const changed = getLocal(); changed.coins = 42; setLocal(changed);
+  await flow.localChanged(); assert.equal(writes.length, 1);
+  finish({ revision: 1 }); await uploading;
+  assert.equal(writes.length, 2); assert.equal(writes[1].backup.state.coins, 42);
+  assert.equal(flow.getView().phase, 'backed-up');
+});
+
+test('offline retry retains the exact original request and snapshot', async () => {
+  let attempts = 0;
+  const { flow, writes, getLocal, setLocal, setCloud } = harness({ put: async write => {
+    if (++attempts === 1) throw Object.assign(new Error('Offline'), { code: 'offline' });
+    setCloud(snapshot(write.backup.state, write.baseRevision + 1));
+    return { revision: write.baseRevision + 1 };
+  } });
+  await flow.signIn(); await flow.choose('keep-local');
+  assert.equal(flow.getView().retryPending, true);
+  const changed = getLocal(); changed.coins = 42; setLocal(changed);
+  await flow.localChanged(); assert.equal(writes.length, 1);
+  await flow.retry(); assert.deepEqual(writes[1], writes[0]);
+  assert.equal(writes[2].backup.state.coins, 42);
+  assert.notEqual(writes[2].requestId, writes[0].requestId);
+});
+
+test('session change immediately invalidates an outstanding write and clears account', async () => {
+  let finish;
+  const response = new Promise(resolve => { finish = resolve; });
+  const { flow, writes } = harness({ put: () => response });
+  await flow.signIn(); const uploading = flow.choose('keep-local');
+  flow.invalidateSession(); finish({ revision: 1 }); await uploading;
+  assert.equal(flow.getView().phase, 'signed-out');
+  assert.equal(flow.getView().subject, null);
+  await flow.localChanged(); assert.equal(writes.length, 1);
+});
+
+test('import invalidates an outstanding upload acknowledgement and stops autosync', async () => {
+  let finish;
+  const response = new Promise(resolve => { finish = resolve; });
+  const { flow, getLocal, setLocal, writes } = harness({ put: () => response });
+  await flow.signIn(); const uploading = flow.choose('keep-local');
+  flow.importPause(); const changed = getLocal(); changed.coins = 42; setLocal(changed);
+  finish({ revision: 1 }); await uploading; await flow.localChanged();
+  assert.equal(flow.getView().phase, 'paused'); assert.equal(writes.length, 1);
+  assert.equal(flow.getView().autoBackup, false);
+});
+
+test('retry of an acknowledged old revision fetches and surfaces a newer conflict', async () => {
+  let attempts = 0;
+  const { flow, setCloud } = harness({ put: async () => {
+    if (++attempts === 1) throw Object.assign(new Error('Lost response'), { code: 'offline' });
+    const remote = fresh(); remote.coins = 43; setCloud(snapshot(remote, 2));
+    return { revision: 1 };
+  } });
+  await flow.signIn(); await flow.choose('keep-local'); await flow.retry();
+  assert.equal(flow.getView().phase, 'conflict');
+  assert.equal(flow.getView().autoBackup, false);
 });
