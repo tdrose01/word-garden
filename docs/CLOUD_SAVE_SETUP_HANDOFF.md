@@ -1,6 +1,14 @@
 # Cloud save preview setup handoff
 
-This handoff does not authorize or perform resource creation, credential entry, persistent access, migration, binding, or deployment.
+The owner approved continuing both projects on 2026-10-03. This handoff records the remaining setup inputs; it does not itself perform resource creation or credential entry. No paid-plan upgrade is authorized.
+
+## Live setup checks on 2026-10-03
+
+The established Cloudflare Pages credential successfully lists Void Swarm deployments, but `wrangler d1 list --json` returns Cloudflare authentication error 10000 for the existing account. The operator must update the established credential securely with Account D1 Edit permission before D1 setup can proceed. Do not paste the token into chat or repository files.
+
+No Clerk instance domain or publishable key has been supplied. The operator must create or identify the Word Garden Clerk application and provide those public configuration values. Enter passwords, verification codes, and secret keys directly in provider settings.
+
+Complete code, fake-adapter validation, and independent review while these inputs are pending. Keep online backup disabled in production until the real two-device restore/conflict/recovery drills and release gates pass.
 
 ## Verified existing targets
 
