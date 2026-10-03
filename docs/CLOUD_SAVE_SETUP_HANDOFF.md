@@ -1,6 +1,6 @@
 # Cloud save preview setup handoff
 
-The owner approved continuing both projects on 2026-10-03. This handoff records the remaining setup inputs; it does not itself perform resource creation or credential entry. No paid-plan upgrade is authorized.
+The owner approved implementation and release of both projects on 2026-10-03, then requested autonomous completion with no further approval requests overnight. Word Garden must deploy before Void Swarm. This handoff records remaining setup inputs; no paid-plan upgrade is authorized.
 
 ## Live setup checks on 2026-10-03
 
@@ -14,12 +14,12 @@ Complete code, fake-adapter validation, and independent review while these input
 
 - Repository: `tdrose01/word-garden`, draft PR #34.
 - Production site: `https://word-garden-6fl.pages.dev`.
-- Immutable production receipt previously reported: `https://a4f09833.word-garden-6fl.pages.dev`.
+- Immutable production receipt previously reported: `https://4a179338.word-garden-6fl.pages.dev`.
 - Existing application backend shape: Cloudflare Pages Functions.
 
 Not yet verified or created:
 
-- The owning Cloudflare account/project identity and the operator's permission to create D1 databases or preview bindings.
+- D1 access or permission to create databases and bindings with the established token. The account and existing Pages projects are verified.
 - A Clerk account/application for Word Garden, its instance domain/issuer, allowed origins, or email-code configuration.
 - Any D1 database named for Word Garden cloud saves.
 - Any preview environment variables, secrets, or persistent Codex access to Clerk or Cloudflare.
@@ -76,7 +76,7 @@ Expected server configuration:
 
 The current JWT design does not require a Clerk secret key. Future administrative account deletion might, but it is out of scope and needs a separate design and approval.
 
-The owner/operator must sign in to Clerk and Cloudflare and enter any password, one-time code, recovery factor, or secret directly in the provider UI. Do not paste those into chat, repository files, issues, PRs, logs, or shell history. If Codex is asked to configure persistent access or transmit a credential, request action-time confirmation for that exact operation and destination.
+The owner/operator must sign in to Clerk and Cloudflare and enter any password, one-time code, recovery factor, or secret directly in the provider UI. Do not paste those into chat, repository files, issues, PRs, logs, or shell history. The existing release authorization covers routine configuration and deployment within this scope. Missing credentials or provider account access remain technical blockers; do not send additional approval requests tonight or invent configuration.
 
 ## Work separable from provider setup
 
@@ -87,7 +87,7 @@ Safe before credentials/resources:
 - local save, conflict, recovery, retry, stale-response, sign-out, and account-switch tests;
 - review of SQL, CORS, JWT claims, privacy copy, and failure messages.
 
-Requires preview resources and action-time approval:
+Authorized work requiring working provider access and configuration:
 
 - creating the Clerk application or D1 database;
 - configuring Clerk email delivery, origins, redirects, or account policies;
@@ -96,7 +96,7 @@ Requires preview resources and action-time approval:
 - deploying a preview or sending any real email/code/save to providers;
 - granting Codex persistent Clerk or Cloudflare access.
 
-Requires a later, separate production release approval:
+Authorized production work requiring successful real-provider validation and release gates:
 
 - production Clerk origins/redirects and email configuration;
 - production D1 migration/binding and retention/deletion operations;
