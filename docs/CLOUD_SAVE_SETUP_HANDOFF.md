@@ -36,7 +36,7 @@ Current free allowances checked during design review were Clerk Hobby up to 50,0
 
 ## Abuse limits and data lifecycle
 
-The Function limits each verified account to 30 writes and 120 reads per minute, and a connecting IP to 240 total requests per minute. It returns 429 with a retry delay and preserves local progress. Limiter failures return 503. Indexed minute counters expire on subsequent requests; only a SHA-256 IP hash is retained for at most two minute buckets, with no plaintext IP in the table or logs.
+The Function limits each verified account to 30 writes and 120 reads per minute, and a connecting IP to 240 total requests per minute. It returns 429 with a retry delay and preserves local progress. Limiter failures return 503. Indexed minute counters expire on subsequent requests; only a SHA-256 IP hash is stored in minute buckets, with no plaintext IP in the table or logs. Buckets older than the prior minute are removed on the next request; idle databases retain expired counters until request activity resumes.
 
 Save, recovery-history, and request-ledger retention is account lifetime in the initial preview. Account/data deletion must remove all three account-scoped tables and associated rate counters; sign-out performs no deletion. Before enabling production, publish the privacy/retention policy and provide the reviewed, verified-account deletion route. Never enable production with an untested deletion or provider recovery path.
 
