@@ -17,7 +17,7 @@ export async function runCloudSaveBrowserAcceptance(browser, url, { development 
   const local = loadState({ getItem: () => null }, () => 0); local.coins = 51;
   const remote = structuredClone(local); remote.coins = 73;
   const snapshot = createCloudSnapshot({ state: remote, revision: 4, deviceId: 'other-device', savedAt: new Date().toISOString() });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const context = await browser.newContext({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true });
   await context.addInitScript(({ local, snapshot }) => {
     localStorage.setItem('word-garden-state', JSON.stringify(local));
     window.__CLOUD_CALLS__ = { signIn: 0, get: 0, writes: [], signOut: 0 };
@@ -27,7 +27,7 @@ export async function runCloudSaveBrowserAcceptance(browser, url, { development 
     window.__CLOUD_CHANGE_SESSION__ = () => { subject = 'other_user'; listeners.forEach(listener => listener(subject)); };
     window.__WORD_GARDEN_CLOUD_TEST__ = { enabled: true,
       auth: {
-        async signIn() { window.__CLOUD_CALLS__.signIn++; subject = 'user_acceptance'; return { subject }; },
+        async signIn() { window.__CLOUD_CALLS__.signIn++; subject = 'user_acceptance'; return { subject, identity: 'very.long.word.garden.acceptance.account@example.test' }; },
         async signOut() { subject = null; window.__CLOUD_CALLS__.signOut++; listeners.forEach(listener => listener(null)); },
         getSubject: () => subject,
         subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }
@@ -61,6 +61,8 @@ export async function runCloudSaveBrowserAcceptance(browser, url, { development 
     assert.equal(await page.evaluate(() => window.__CLOUD_CALLS__.signIn), 0);
     await page.locator('[data-cloud-action="sign-in"]').click();
     await page.locator('[data-cloud-choice="use-cloud"]').waitFor();
+    assert.match(await page.locator('[data-cloud-identity]').textContent(), /Signed in as very\.long\.word\.garden\.acceptance\.account@example\.test/);
+    assert.equal(await page.locator('[data-cloud-identity]').evaluate(element => getComputedStyle(element).overflowWrap), 'anywhere');
     assert.equal(await page.locator('.cloud-save-details').count(), 2, 'comparison includes device and online daily/replay details');
     assert.match(await page.locator('.cloud-save-details').first().textContent(), /Daily .*Replay:/);
     assert.equal(await page.locator('[data-cloud-time]').getAttribute('datetime'), snapshot.savedAt);
@@ -101,10 +103,12 @@ export async function runCloudSaveBrowserAcceptance(browser, url, { development 
     assert.equal(await page.evaluate(() => window.__CLOUD_CALLS__.writes[3].backup.state.coins), 88, 'import uploads only after another explicit choice');
     await page.evaluate(() => window.__CLOUD_CHANGE_SESSION__());
     await page.locator('[data-cloud-action="sign-in"]').waitFor();
+    assert.equal(await page.locator('[data-cloud-identity]').count(), 0, 'account change clears stale identity');
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')).coins), 88, 'account change retains local progress');
     await page.locator('[data-cloud-action="sign-in"]').click();
     await page.locator('[data-cloud-action="sign-out"]').click();
     await page.locator('[data-cloud-action="sign-in"]').waitFor();
+    assert.equal(await page.locator('[data-cloud-identity]').count(), 0, 'sign-out clears identity');
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('word-garden-state')).coins), 88, 'sign-out retains playable local copy');
     assert.deepEqual(network, [], 'fake adapter acceptance uses no real provider or backend');
     assert.deepEqual(failures, []);

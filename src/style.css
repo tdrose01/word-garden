@@ -1335,6 +1335,7 @@ body[data-page-scroll="true"] { overflow-y: auto; }
 
 .save-controls { display: grid; gap: .7rem; }
 .save-controls p { margin: 0; }
+[data-cloud-identity] { min-width: 0; overflow-wrap: anywhere; }
 .backup-input { display: grid; gap: .5rem; font-weight: 700; }
 .backup-input input { max-width: 100%; min-width: 0; font: inherit; }
 .import-preview { border: 2px solid #6b8056; border-radius: 12px; padding: .8rem; }

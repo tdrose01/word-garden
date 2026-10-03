@@ -61,11 +61,15 @@ export function createCloudSaveUI({ enabled, publishableKey, readLocal, writeLoc
       preserveBackup,
       createRequestId: createId, deviceId
     });
-    auth.subscribe?.(subject => {
+    auth.subscribe?.(account => {
+      const subject = account && typeof account === 'object' ? account.subject : account;
+      const identity = account && typeof account === 'object' ? account.identity : auth.getIdentity?.();
       if (expectedSubject && subject !== expectedSubject) {
         ++sessionGeneration; ++actionGeneration; active = false;
         expectedSubject = null; clearTimeout(localChangeTimer);
         flow.invalidateSession(); onChange();
+      } else if (expectedSubject && subject === expectedSubject) {
+        flow.updateIdentity(subject, identity); onChange();
       }
     });
     return flow;

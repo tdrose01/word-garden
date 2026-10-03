@@ -19,16 +19,22 @@ export function createCloudSaveFlow({ auth, api, readLocal, writeLocal, localIsM
   let autoEnabled = false;
   let pending = null;
   let writing = false;
-  let current = { phase: 'signed-out', subject: null, message: 'Sign in only if you want online backup.' };
+  let current = { phase: 'signed-out', subject: null, identity: null, message: 'Sign in only if you want online backup.' };
   const update = next => {
     if (!phases.has(next.phase)) throw new Error('Invalid cloud save phase.');
-    current = { ...next, autoBackup: autoEnabled };
+    const identity = Object.hasOwn(next, 'identity') ? next.identity : current.identity;
+    current = { ...next, identity, autoBackup: autoEnabled };
     return view(current);
   };
   const clearPending = () => { pending = null; writing = false; autoEnabled = false; };
   function invalidateSession(reason = 'Account changed. Sign in again to compare progress.') {
     ++operation; cloudSnapshot = null; clearPending();
-    return update({ phase: 'signed-out', subject: null, message: reason });
+    return update({ phase: 'signed-out', subject: null, identity: null, message: reason });
+  }
+  function updateIdentity(subject, identity) {
+    if (!current.subject || current.subject !== subject) return view(current);
+    const value = typeof identity === 'string' && identity.trim() ? identity.trim() : null;
+    return update({ ...current, identity: value });
   }
   function pauseForImport() {
     ++operation; clearPending();
@@ -93,23 +99,26 @@ export function createCloudSaveFlow({ auth, api, readLocal, writeLocal, localIsM
   }
   async function signIn() {
     const generation = ++operation;
+    let session = null;
     cloudSnapshot = null; clearPending();
-    update({ phase: 'checking', subject: null, message: 'Signing in without changing progress…' });
+    update({ phase: 'checking', subject: null, identity: null, message: 'Signing in without changing progress…' });
     try {
-      const session = await auth.signIn();
+      session = await auth.signIn();
       if (generation !== operation) return view(current);
       if (!session?.subject) throw new Error('Sign-in did not return an account.');
+      update({ phase: 'checking', subject: session.subject, identity: session.identity || null,
+        message: 'Signed in. Comparing device and online progress…' });
       const remote = await api.get();
       if (generation !== operation) return view(current);
       cloudSnapshot = remote;
       const localState = readLocal();
       const plan = planInitialSync({ localState,
         localIsMeaningful: Boolean(localIsMeaningful(localState)), cloudSnapshot: remote });
-      return update({ ...plan, phase: plan.status, subject: session.subject,
+      return update({ ...plan, phase: plan.status, subject: session.subject, identity: session.identity || null,
         message: plan.status === 'up-to-date' ? 'This device matches the online backup. Choose online backup before syncing changes.' : 'Choose before any progress changes.' });
     } catch (error) {
       if (generation !== operation) return view(current);
-      return update({ phase: 'error', subject: null,
+      return update({ phase: 'error', subject: session?.subject || null, identity: session?.identity || null,
         message: error?.message || 'Sign-in failed. Local progress is unchanged.' });
     }
   }
@@ -178,7 +187,7 @@ export function createCloudSaveFlow({ auth, api, readLocal, writeLocal, localIsM
   }
   return { choose, getView: () => view(current),
     getComparisonSnapshot: () => cloudSnapshot ? structuredClone(cloudSnapshot) : null, signIn, signOut, invalidateSession,
-    localChanged, pauseForImport, importPause: pauseForImport, retry };
+    localChanged, pauseForImport, importPause: pauseForImport, retry, updateIdentity };
 }
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({
@@ -191,8 +200,11 @@ function summary(label, value) {
 }
 
 export function renderCloudSavePanel(model) {
-  const status = `<p role="status">${escape(model.message)}</p>`;
-  if (model.phase === 'signed-out' || model.phase === 'error') {
+  const account = model.subject
+    ? `<p data-cloud-identity role="status"><strong>${model.identity ? `Signed in as ${escape(model.identity)}` : 'Signed in. Account email is unavailable.'}</strong></p>`
+    : '';
+  const status = `${account}<p role="status">${escape(model.message)}</p>`;
+  if (model.phase === 'signed-out' || (model.phase === 'error' && !model.subject)) {
     return `<section class="cloud-save" aria-labelledby="cloud-save-title"><h3 id="cloud-save-title">Online backup <small>Optional</small></h3>${status}<button data-cloud-action="sign-in">Sign in to back up</button></section>`;
   }
   if (model.phase === 'up-to-date' && !model.autoBackup) {

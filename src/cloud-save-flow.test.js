@@ -14,7 +14,7 @@ function harness({ local = fresh(), cloud = null, meaningful = false, delayedGet
   const recoveries = [];
   let signOuts = 0;
   const flow = createCloudSaveFlow({
-    auth: { signIn: async () => ({ subject: 'user_1' }), signOut: async () => { signOuts++; } },
+    auth: { signIn: async () => ({ subject: 'user_1', identity: 'player@example.test' }), signOut: async () => { signOuts++; } },
     api: {
       get: delayedGet || (async () => cloud),
       put: async write => { writes.push(write); if (put) return put(write); cloud = createCloudSnapshot({ state: write.backup.state, revision: write.baseRevision + 1, savedAt: now, deviceId: 'this-device' }); return { revision: write.baseRevision + 1 }; }
@@ -64,6 +64,7 @@ test('cancel and sign-out never alter or upload local progress', async () => {
   await flow.signIn();
   assert.equal((await flow.choose('cancel')).phase, 'paused');
   assert.equal((await flow.signOut()).phase, 'signed-out');
+  assert.equal(flow.getView().identity, null);
   assert.equal(getLocal().coins, 42);
   assert.equal(writes.length, 0);
   assert.equal(getSignOuts(), 1);
@@ -83,7 +84,7 @@ test('late account response is ignored after sign-out', async () => {
 
 test('panel renders explicit accessible choices without automatic-merge language', () => {
   const html = renderCloudSavePanel({
-    phase: 'conflict', message: 'Choose before changes.',
+    phase: 'conflict', subject: 'user_1', identity: 'player+garden@example.test', message: 'Choose before changes.',
     local: { campaignCompleted: 2, coins: 42, gardenPlants: 1 },
     cloud: { campaignCompleted: 1, coins: 40, gardenPlants: 0 }
   });
@@ -91,7 +92,39 @@ test('panel renders explicit accessible choices without automatic-merge language
   assert.match(html, /Use this device/);
   assert.match(html, /Use online backup/);
   assert.match(html, /Cancel/);
+  assert.match(html, /Signed in as player\+garden@example\.test/);
+  assert.match(html, /data-cloud-identity role="status"/);
   assert.doesNotMatch(html, /merge/i);
+});
+
+test('signed-in backup errors preserve provider identity without claiming backup success', async () => {
+  const { flow } = harness({ delayedGet: async () => { throw new Error('Online backup check failed.'); } });
+  const result = await flow.signIn();
+  assert.equal(result.phase, 'error');
+  assert.equal(result.subject, 'user_1');
+  assert.equal(result.identity, 'player@example.test');
+  const html = renderCloudSavePanel(result);
+  assert.match(html, /Signed in as player@example\.test/);
+  assert.match(html, /Online backup check failed/);
+  assert.match(html, /Sign out/);
+  assert.doesNotMatch(html, /Backed up online/);
+});
+
+test('signed-in state remains explicit when the provider email is unavailable', () => {
+  const html = renderCloudSavePanel({ phase: 'error', subject: 'user_1', identity: null, message: 'Backup check failed.' });
+  assert.match(html, /Signed in\. Account email is unavailable\./);
+  assert.doesNotMatch(html, /user_1/);
+});
+
+test('same-account provider updates refresh identity without changing backup state', async () => {
+  const { flow } = harness();
+  await flow.signIn();
+  const before = flow.getView();
+  flow.updateIdentity('user_1', 'updated@example.test');
+  assert.equal(flow.getView().identity, 'updated@example.test');
+  assert.equal(flow.getView().phase, before.phase);
+  flow.updateIdentity('another_user', 'wrong@example.test');
+  assert.equal(flow.getView().identity, 'updated@example.test');
 });
 
 
@@ -159,6 +192,7 @@ test('session change immediately invalidates an outstanding write and clears acc
   flow.invalidateSession(); finish({ revision: 1 }); await uploading;
   assert.equal(flow.getView().phase, 'signed-out');
   assert.equal(flow.getView().subject, null);
+  assert.equal(flow.getView().identity, null);
   await flow.localChanged(); assert.equal(writes.length, 1);
 });
 

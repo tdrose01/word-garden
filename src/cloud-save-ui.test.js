@@ -9,8 +9,10 @@ function harness({ failRecovery = false } = {}) {
   const remote = structuredClone(state); remote.coins = 73;
   const snapshot = createCloudSnapshot({ state: remote, revision: 4, deviceId: 'other', savedAt: new Date().toISOString() });
   const storage = new Map(); const calls = []; const errors = { textContent: '' };
+  let accountListener = () => {};
   const ui = createCloudSaveUI({ enabled: true,
-    auth: { signIn: async () => { calls.push('sign-in'); return { subject: 'user_test' }; }, signOut: async () => calls.push('sign-out') },
+    auth: { signIn: async () => { calls.push('sign-in'); return { subject: 'user_test', identity: 'player@example.test' }; },
+      signOut: async () => calls.push('sign-out'), subscribe(listener) { accountListener = listener; return () => {}; } },
     api: { get: async () => snapshot, put: async write => ({ requestId: write.requestId, revision: write.baseRevision + 1 }) },
     readLocal: () => structuredClone(state), writeLocal: value => { calls.push('restore'); state = value; },
     storage: { getItem: key => storage.get(key) || null, setItem(key, value) { if (failRecovery && key === CLOUD_RECOVERY_KEY) throw new Error('Storage full'); storage.set(key, value); } },
@@ -22,7 +24,7 @@ function harness({ failRecovery = false } = {}) {
     ui.bind({ querySelectorAll: () => [button], ownerDocument: { querySelector: () => errors } });
     await handler();
   }
-  return { ui, calls, storage, press, state: () => state, errors };
+  return { ui, calls, storage, press, state: () => state, errors, emitAccount: value => accountListener(value) };
 }
 test('disabled or unconfigured UI has no auth or persistence side effects', () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -59,6 +61,17 @@ test('failed recovery persistence blocks local restore', async () => {
   assert.equal(h.state().coins, 51);
   assert.equal(h.ui.getView().phase, 'error');
   assert.ok(!h.calls.includes('restore'));
+});
+
+test('provider identity hydration refreshes in Settings and account switches clear it', async () => {
+  const h = harness();
+  await h.press({ cloudAction: 'sign-in' });
+  assert.match(h.ui.render(), /Signed in as player@example\.test/);
+  h.emitAccount({ subject: 'user_test', identity: 'updated@example.test' });
+  assert.match(h.ui.render(), /Signed in as updated@example\.test/);
+  h.emitAccount({ subject: 'other_user', identity: 'other@example.test' });
+  assert.equal(h.ui.getView().phase, 'signed-out');
+  assert.doesNotMatch(h.ui.render(), /example\.test/);
 });
 
 test('late previous-account reads and write conflicts cannot change current comparison details', async () => {
