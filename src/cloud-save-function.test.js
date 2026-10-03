@@ -83,3 +83,42 @@ test('cloud Function parses a bounded valid streamed write', async () => {
   });
   assert.equal((await __test.readJson(request)).value.requestId, intent.requestId);
 });
+
+
+test('cloud Function verifies signature, issuer, audience, expiry and authorized account session', async () => {
+  const issuer = 'https://word-garden-jwt-regression.clerk.accounts.dev';
+  const key = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  const jwk = { ...await crypto.subtle.exportKey('jwk', key.publicKey), kid: 'test-key' };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    assert.equal(url, `${issuer}/.well-known/jwks.json`);
+    return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
+  };
+  const env = { CLERK_ISSUER: issuer, CLERK_AUTHORIZED_PARTIES: 'https://word-garden-6fl.pages.dev', CLERK_AUDIENCE: 'word-garden' };
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { iss: issuer, sub: 'user_verified', exp: now + 60, azp: 'https://word-garden-6fl.pages.dev', aud: 'word-garden' };
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  async function token(payload) {
+    const message = `${encode({ alg: 'RS256', kid: 'test-key' })}.${encode(payload)}`;
+    const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key.privateKey, new TextEncoder().encode(message));
+    return `${message}.${Buffer.from(signature).toString('base64url')}`;
+  }
+  async function verify(payload, corrupt = false) {
+    const signed = await token(payload);
+    const request = new Request('https://word-garden-6fl.pages.dev/api/cloud-save', {
+      headers: { authorization: `Bearer ${corrupt ? signed.slice(0, -10) + 'AAAAAAAAAA' : signed}` }
+    });
+    return __test.verifySession(request, env, 'https://word-garden-6fl.pages.dev');
+  }
+  try {
+    assert.deepEqual(await verify(claims), { accountId: 'user_verified' });
+    for (const patch of [{ iss: 'https://attacker.example' }, { sub: '' }, { exp: now - 1 },
+      { azp: 'https://attacker.example' }, { aud: 'other-game' }, { nbf: now + 60 }, { nbf: 'invalid' }]) {
+      assert.equal((await verify({ ...claims, ...patch })).status, 401);
+    }
+    assert.equal((await verify(claims, true)).status, 401);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

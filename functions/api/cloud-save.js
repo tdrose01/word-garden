@@ -98,7 +98,7 @@ async function verifySession(request, env, requestOrigin) {
     const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     const parties = configuredParties(env, requestOrigin);
     if (!validSignature || payload.iss !== issuer || typeof payload.sub !== 'string' || !payload.sub ||
-        !Number.isFinite(payload.exp) || payload.exp <= now || (payload.nbf && payload.nbf > now) ||
+        !Number.isFinite(payload.exp) || payload.exp <= now || (payload.nbf !== undefined && (!Number.isFinite(payload.nbf) || payload.nbf > now)) ||
         !parties.has(payload.azp) || (audience && !audiences.includes(audience))) throw new Error('JWT claims invalid');
     return { accountId: payload.sub };
   } catch {
@@ -271,4 +271,4 @@ export async function onRequestPut(context) {
   return jsonResponse({ ok: true, revision: nextRevision, requestId: write.requestId }, write.baseRevision === 0 ? 201 : 200, access.origin);
 }
 
-export const __test = { cloudSnapshotFromRow, getAllowedOrigin, hashWrite, readJson, validateWrite };
+export const __test = { cloudSnapshotFromRow, getAllowedOrigin, hashWrite, readJson, validateWrite, verifySession };
