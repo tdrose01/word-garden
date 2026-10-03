@@ -1,6 +1,6 @@
 # Optional sign-in and cloud saves — proposed design
 
-Status: **proposal for review**. This change does not select, configure, or deploy an identity or storage provider.
+Status: **direction approved 2026-10-02**. Clerk + D1 implementation may proceed, but external resources, credentials, bindings, and deployment still require separate authorization.
 
 Issue: [#33](https://github.com/tdrose01/word-garden/issues/33)
 
@@ -161,13 +161,15 @@ Coins and rewards are a ledger-like result of completed puzzles, objective dates
 
 ## Approval gates and rollout
 
-No provider-specific code, account, secret, database, binding, grant, or deployment should be created until the owner approves:
+The owner approved the following direction on 2026-10-02:
 
 1. Clerk + D1 versus an alternative.
 2. Email-code sign-in and the account recovery limitations.
 3. Guest-copy behavior on sign-out/account switch.
 4. Whole-save conflict resolution and recovery retention.
 5. Privacy copy, deletion/retention policy, budget, and production plan.
+
+Provider code can now be implemented behind the disabled configuration boundary. Creating an account, secret, database, binding, grant, paid service, preview environment, or deployment remains a separate approval gate.
 
 After approval:
 
