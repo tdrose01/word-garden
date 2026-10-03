@@ -61,7 +61,7 @@ export function createCloudSaveApi({ getToken, fetchImpl = fetch, endpoint = DEF
   }
 
   return {
-    get: () => request('GET'),
+    get: async () => (await request('GET'))?.snapshot ?? null,
     put: (writeIntent) => request('PUT', writeIntent)
   };
 }

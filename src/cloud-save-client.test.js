@@ -33,6 +33,12 @@ test('signed-out and offline requests preserve local-only behavior', async () =>
 });
 
 test('missing saves and stale revisions are distinct outcomes', async () => {
+  const current = { revision: 7 };
+  const found = createCloudSaveApi({
+    getToken: async () => 'token', fetchImpl: async () => jsonResponse(200, { snapshot: current })
+  });
+  assert.equal(await found.get(), current);
+
   const missing = createCloudSaveApi({
     getToken: async () => 'token', fetchImpl: async () => jsonResponse(404, { error: 'Not found.' })
   });
