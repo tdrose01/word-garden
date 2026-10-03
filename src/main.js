@@ -5,6 +5,7 @@ import '@fontsource/fraunces/latin-700.css';
 import './style.css';
 import { prepareWheel, extendSelection } from './wheel.js';
 import { writeProgress, createBackup, parseBackup, MAX_BACKUP_BYTES } from './persistence.js';
+import { createCloudSaveUI } from './cloud-save-ui.js';
 import { getPuzzleTheme as getLevelTheme, safeSceneText } from './themes.js';
 import { botanicalScenery, plantArt } from './botanical.js';
 import { playGardenTone } from './sensory.js';
@@ -66,11 +67,13 @@ let gardenSpotlight = null;
 let pendingImport = null;
 let importReadId = 0;
 let importNotice = '';
+let cloudSave = null;
 function saveState(value) {
   const result = writeProgress(value);
   saveNotice = result.message;
   if (!result.ok) message = result.message;
   app.querySelectorAll('[data-save-status]').forEach(status => { status.textContent = saveNotice; });
+  cloudSave?.localChanged();
   return result.ok;
 }
 let rewardInFlight = false;
@@ -78,6 +81,25 @@ let hintTarget = null;
 let hintCell = null;
 let panelReturnFocus = 'hint';
 let renderedDailyDate = state.mode === 'daily' ? getProgress(state).dateKey : null;
+
+// Acceptance adapters exist only in the development build. Production requires
+// the explicit feature flag and a supplied Clerk publishable key.
+const cloudTest = import.meta.env.DEV ? window.__WORD_GARDEN_CLOUD_TEST__ : null;
+cloudSave = createCloudSaveUI({
+  enabled: import.meta.env.VITE_CLOUD_SAVE_ENABLED === 'true' || Boolean(cloudTest?.enabled),
+  publishableKey: import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
+  auth: cloudTest?.auth, api: cloudTest?.api,
+  readLocal: () => structuredClone(state),
+  writeLocal(value) {
+    if (!saveState(value)) throw new Error('Restore was not applied because browser storage is unavailable. Download your previous save.');
+    state = value; selection = []; completion = null; feedback = null;
+    importReadId++; pendingImport = null; importNotice = '';
+    inspectedPlot = null; gardenSpotlight = null; gardenNotice = '';
+    wheelLetters = prepareWheel(getLevel(state));
+    message = 'Online progress restored. Your previous save is available in Settings.';
+  },
+  onChange: () => { if (panel === 'settings') render(); }
+});
 
 function render() {
   refreshDaily(false);
@@ -292,7 +314,7 @@ function renderGarden(stats = {}) {
 function renderGamePanel(snapshot) {
   if (!panel) return '';
   let title = 'Settings';
-  let content = `<section class="save-controls" aria-label="Save and backup"><p>Progress stays in this browser only. No cloud account or sync. Clearing browser data removes it; keep a backup for another device.</p><button data-action="save-progress">Save progress</button><p data-save-status role="status">${escapeAttribute(saveNotice)}</p><button data-action="download-backup">Download JSON backup</button><label class="backup-input">Import JSON backup<input type="file" accept=".json,application/json" data-import-backup></label><p role="status">${escapeAttribute(importNotice)}</p>${pendingImport ? `<div class="import-preview"><h3>Replace progress?</h3><p>Backup: ${pendingImport.campaign.completedLevels} campaign completions, ${pendingImport.coins} coins, ${pendingImport.garden?.plots.length || 0} planted plots. Mode: ${pendingImport.mode}.</p><p>Current: ${createSnapshot(state).campaignStats.completedLevels} campaign completions, ${state.coins} coins. This replaces campaign, daily, replay, garden and settings. Download your current backup first if you want to keep it.</p><button data-action="confirm-import">Replace with this backup</button><button data-action="cancel-import">Cancel import</button></div>` : ''}</section><div class="settings-list"><button data-setting="sound" role="switch" aria-checked="${Boolean(snapshot.settings?.sound)}"><span><strong>Garden sounds</strong><small>Soft letter tones and a completion melody</small></span><b>${snapshot.settings?.sound ? 'On' : 'Off'}</b></button><button data-setting="haptics" role="switch" aria-checked="${snapshot.settings?.haptics !== false}"><span><strong>Touch feedback</strong><small>Gentle vibration on supported devices</small></span><b>${snapshot.settings?.haptics !== false ? 'On' : 'Off'}</b></button></div><p class="panel-note">Animations follow your device’s reduced-motion preference.</p><button data-action="reset">Reset progress…</button>`;
+  let content = `<section class="save-controls" aria-label="Save and backup"><p>${cloudSave ? 'Progress stays on this device until you choose optional online backup below. Keep a JSON backup too.' : 'Progress stays in this browser only. No cloud account or sync. Clearing browser data removes it; keep a backup for another device.'}</p><button data-action="save-progress">Save progress</button><p data-save-status role="status">${escapeAttribute(saveNotice)}</p><button data-action="download-backup">Download JSON backup</button><label class="backup-input">Import JSON backup<input type="file" accept=".json,application/json" data-import-backup></label><p role="status">${escapeAttribute(importNotice)}</p>${pendingImport ? `<div class="import-preview"><h3>Replace progress?</h3><p>Backup: ${pendingImport.campaign.completedLevels} campaign completions, ${pendingImport.coins} coins, ${pendingImport.garden?.plots.length || 0} planted plots. Mode: ${pendingImport.mode}.</p><p>Current: ${createSnapshot(state).campaignStats.completedLevels} campaign completions, ${state.coins} coins. This replaces campaign, daily, replay, garden and settings. Download your current backup first if you want to keep it.</p><button data-action="confirm-import">Replace with this backup</button><button data-action="cancel-import">Cancel import</button></div>` : ''}</section>${cloudSave?.render() || ''}<div class="settings-list"><button data-setting="sound" role="switch" aria-checked="${Boolean(snapshot.settings?.sound)}"><span><strong>Garden sounds</strong><small>Soft letter tones and a completion melody</small></span><b>${snapshot.settings?.sound ? 'On' : 'Off'}</b></button><button data-setting="haptics" role="switch" aria-checked="${snapshot.settings?.haptics !== false}"><span><strong>Touch feedback</strong><small>Gentle vibration on supported devices</small></span><b>${snapshot.settings?.haptics !== false ? 'On' : 'Off'}</b></button></div><p class="panel-note">Animations follow your device’s reduced-motion preference.</p><button data-action="reset">Reset progress…</button>`;
   if (panel === 'confirm-reset') {
     title = 'Reset your garden?';
     content = '<p>This clears your levels, coins, daily streaks and garden on this device.</p><button data-action="confirm-reset" class="danger">Yes, reset all progress</button>';
@@ -337,6 +359,7 @@ function closeGamePanel() {
 }
 
 function bindGamePanel() {
+  cloudSave?.bind(app);
   app.querySelector('[data-import-backup]')?.addEventListener('change', async event => {
     const file = event.target.files[0];
     if (!file) return;
@@ -1085,6 +1108,8 @@ function handleAction(action) {
   }
   if (action === 'cancel-import') { importReadId++; pendingImport = null; importNotice = 'Import cancelled. Progress unchanged.'; render(); }
   if (action === 'confirm-import' && pendingImport) {
+    try { cloudSave?.pauseForImport(); }
+    catch { importNotice = 'Import not applied: the previous save could not be preserved. Download a JSON backup and free browser storage first.'; render(); return; }
     if (saveState(pendingImport)) {
       state = pendingImport; pendingImport = null; selection = []; completion = null; feedback = null;
       inspectedPlot = null; gardenSpotlight = null; gardenNotice = '';
