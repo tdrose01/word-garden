@@ -23,5 +23,8 @@
     "@fontsource/nunito": "5.2.7",
     "playwright": "^1.58.2",
     "vite": "^5.4.21"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }
