@@ -4,10 +4,14 @@ from pathlib import Path
 import tempfile
 import json
 import io
+import sys
 from contextlib import redirect_stdout
 import unittest
 from unittest.mock import patch
 from unittest.mock import Mock
+
+# Standalone guard tests must not dirty the source checkout with __pycache__.
+sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location('preview', Path(__file__).with_name('cloud-preview.py'))
 preview = importlib.util.module_from_spec(spec)
