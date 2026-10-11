@@ -1,10 +1,11 @@
 # Test and preview from the cloud environment
 
 This is the reusable preview deployment workflow for the existing Cloudflare
-Pages projects `word-garden` and `void-swarm`. The scripts are identical in both
-repositories and select the fixed project/test gate by `package.json` name.
-Project names come from the repositories' existing Pages origins; the first live
-run validates the actual project and production branch via the Cloudflare API.
+Pages projects `word-garden-6fl` and `void-swarm`. The runner maps the
+`word-garden` package name explicitly to `word-garden-6fl`; `void-swarm` maps to
+`void-swarm`. Package names are not passed directly to Wrangler or the API.
+The first live run validates the fixed project and production branch via the
+Cloudflare API. The obsolete `word-garden` Pages project is rejected.
 No project is created and no project configuration is written.
 
 ## Use
@@ -74,7 +75,8 @@ project updates, production deployments, promotions, binding changes or save wri
 After upload, the runner queries preview deployments and reads the exact matched
 deployment ID. It requires `environment=preview`, successful status, ad hoc
 trigger, exact full SHA, branch and unique run message. The immutable deployment
-origin must be `https://<deployment-id>.{project}.pages.dev`; aliases and the
+origin must be `https://<deployment-id>.word-garden-6fl.pages.dev` for Word
+Garden or `https://<deployment-id>.void-swarm.pages.dev` for Void Swarm; aliases and the
 production origin are refused. It reads `preview-proof.json` at that origin and
 requires the exact commit, unique run ID and final-bundle SHA-256 marker. It then
 checks HTML and boots the game in a fresh phone-sized Chromium context, rejecting
@@ -108,7 +110,7 @@ do not hand the token to arbitrary deployment commands.
 For restricted HTTP egress, allow `api.cloudflare.com`, `registry.npmjs.org`,
 `github.com`, `api.github.com`, `codeload.github.com`, `raw.githubusercontent.com`,
 `cdn.playwright.dev`, `playwright.download.prss.microsoft.com`, and the immutable
-deployment hosts under `word-garden.pages.dev` and `void-swarm.pages.dev` (including
+deployment hosts under `word-garden-6fl.pages.dev` and `void-swarm.pages.dev` (including
 their subdomains). If browser/dependency redirects need another destination,
 use the supported network settings after inspecting the denial. Do not bypass
 the proxy or disable TLS verification. The Cloudflare secret remains restricted

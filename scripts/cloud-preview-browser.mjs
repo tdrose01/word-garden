@@ -1,11 +1,9 @@
 // Read-only verification against the immutable Pages deployment origin.
 import { chromium } from 'playwright';
+import { validatePreviewOrigin } from './cloud-preview-url.mjs';
 
 const [url, project] = process.argv.slice(2);
-if (!['word-garden', 'void-swarm'].includes(project) ||
-    !new RegExp(`^https://[a-z0-9]+\\.${project}\\.pages\\.dev$`).test(url || '')) {
-  throw new Error('An immutable allow-listed Pages deployment URL is required.');
-}
+const selector = validatePreviewOrigin(url, project);
 const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
 const browser = await chromium.launch({
   headless: true,
@@ -31,7 +29,7 @@ try {
   page.on('response', response => { if (response.status() >= 400) failures.push('Preview asset returned an error.'); });
   const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
   if (!response?.ok()) throw new Error('Preview HTML did not load.');
-  await page.waitForSelector(project === 'word-garden' ? '.letter' : 'canvas', { state: 'visible', timeout: 30000 });
+  await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
   await page.evaluate(() => document.fonts.ready);
   if (project === 'void-swarm') {
     const painted = await page.locator('canvas').first().evaluate(canvas => {

@@ -17,9 +17,10 @@ import uuid
 
 WRANGLER = '4.45.0'
 PROJECTS = {
-    'word-garden': ['test', 'test:feedback', 'build', 'test:smoke'],
+    'word-garden-6fl': ['test', 'test:feedback', 'build', 'test:smoke'],
     'void-swarm': ['test:cloud', 'build'],
 }
+REPOSITORY_PROJECTS = {'word-garden': 'word-garden-6fl', 'void-swarm': 'void-swarm'}
 
 
 class PreviewError(Exception):
@@ -113,6 +114,7 @@ def production_snapshot(project, branch):
 
 
 def validate_deployment(deployment, branch, commit, message, project):
+    require(project in PROJECTS, 'Project is not allow-listed.')
     require(deployment.get('environment') == 'preview', 'Deployment is not preview.')
     trigger = deployment.get('deployment_trigger', {})
     require(trigger.get('type') == 'ad_hoc', 'Unexpected deployment trigger.')
@@ -182,8 +184,9 @@ def main():
     if args.receipt:
         require(not Path(args.receipt).resolve().is_relative_to(root), 'Receipt must be outside the repository.')
     require((root / 'package.json').exists(), 'Run from a complete repository checkout.')
-    project = json.loads((root / 'package.json').read_text())['name']
-    require(project in PROJECTS, 'Repository is not allow-listed.')
+    repository = json.loads((root / 'package.json').read_text())['name']
+    require(repository in REPOSITORY_PROJECTS, 'Repository is not allow-listed.')
+    project = REPOSITORY_PROJECTS[repository]
     require(int(run(['node', '--version'], root, capture=True).lstrip('v').split('.')[0]) >= 22, 'Use Node 22 or newer.')
     require(run(['git', 'rev-parse', '--show-toplevel'], root, capture=True) == str(root), 'Not a complete repository checkout.')
     require(not run(['git', 'status', '--porcelain', '--untracked-files=all'], root, capture=True),
