@@ -20,16 +20,22 @@ spec.loader.exec_module(preview)
 
 
 class PreviewGuards(unittest.TestCase):
-    def test_word_garden_package_maps_to_exact_pages_project(self):
+    def test_word_garden_api_project_and_hostname_are_distinct(self):
         self.assertEqual(preview.REPOSITORY_PROJECTS,
-                         {'word-garden': 'word-garden-6fl', 'void-swarm': 'void-swarm'})
+                         {'word-garden': 'word-garden', 'void-swarm': 'void-swarm'})
+        self.assertEqual(preview.PROJECTS['word-garden']['hostname'],
+                         'word-garden-6fl.pages.dev')
         cf = preview.Cloudflare('a' * 32, 'fixture-only',
                                 preview.REPOSITORY_PROJECTS['word-garden'])
-        self.assertTrue(cf.base.endswith('/pages/projects/word-garden-6fl'))
+        self.assertTrue(cf.base.endswith('/pages/projects/word-garden'))
         with self.assertRaises(preview.PreviewError):
-            preview.Cloudflare('a' * 32, 'fixture-only', 'word-garden')
+            preview.Cloudflare('a' * 32, 'fixture-only', 'word-garden-6fl')
         with self.assertRaises(preview.PreviewError):
-            preview.production_snapshot({'name': 'word-garden', 'production_branch': 'main'}, 'preview-a')
+            preview.production_snapshot({'name': 'word-garden-6fl', 'subdomain': 'word-garden-6fl.pages.dev',
+                                         'production_branch': 'main'}, 'preview-a')
+        with self.assertRaises(preview.PreviewError):
+            preview.production_snapshot({'name': 'word-garden', 'subdomain': 'word-garden.pages.dev',
+                                         'production_branch': 'main'}, 'preview-a')
         item = self.deployment()
         item['url'] = 'https://abcd.word-garden.pages.dev'
         with self.assertRaises(preview.PreviewError):
@@ -56,9 +62,9 @@ class PreviewGuards(unittest.TestCase):
         result = subprocess.run(['node', '--input-type=module', '-e', r'''
 import assert from 'node:assert/strict';
 import { validatePreviewOrigin } from './scripts/cloud-preview-url.mjs';
-assert.equal(validatePreviewOrigin('https://abcd.word-garden-6fl.pages.dev', 'word-garden-6fl'), '.letter');
+assert.equal(validatePreviewOrigin('https://abcd.word-garden-6fl.pages.dev', 'word-garden'), '.letter');
 assert.equal(validatePreviewOrigin('https://abcd.void-swarm.pages.dev', 'void-swarm'), 'canvas');
-for (const project of ['word-garden', 'other', 'word-garden-6fl.pages.dev']) {
+for (const project of ['word-garden-6fl', 'other', 'word-garden-6fl.pages.dev']) {
   assert.throws(() => validatePreviewOrigin(`https://abcd.${project}.pages.dev`, project));
 }
 for (const url of [
@@ -69,7 +75,7 @@ for (const url of [
   'https://abcd.word-garden-6fl.pages.dev/', 'https://abcd.word-garden-6fl.pages.dev?alias=1',
   'http://abcd.word-garden-6fl.pages.dev', 'https://abcd.void-swarm.pages.dev',
   'https://abcd.word-garden-6fl.pages.dev\n', 'https://abcd.word-garden-6fl.pages.dev\r', undefined
-]) assert.throws(() => validatePreviewOrigin(url, 'word-garden-6fl'));
+]) assert.throws(() => validatePreviewOrigin(url, 'word-garden'));
 '''], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -80,7 +86,9 @@ for (const url of [
                 preview.validate_branch(branch)
         for production in ('preview-a', 'Preview/a', '', None):
             with self.subTest(production=production), self.assertRaises(preview.PreviewError):
-                preview.production_snapshot({'name': 'word-garden-6fl', 'production_branch': production}, 'preview-a')
+                preview.production_snapshot({'name': 'word-garden',
+                                             'subdomain': 'word-garden-6fl.pages.dev',
+                                             'production_branch': production}, 'preview-a')
         preview.validate_branch('preview-issue-123', 'main')
 
     def deployment(self):
@@ -90,7 +98,7 @@ for (const url of [
                 'commit_hash': 'a' * 40, 'commit_message': 'cloud-preview:run'}}}
 
     def validate(self, deployment):
-        return preview.validate_deployment(deployment, 'preview-a', 'a' * 40, 'cloud-preview:run', 'word-garden-6fl')
+        return preview.validate_deployment(deployment, 'preview-a', 'a' * 40, 'cloud-preview:run', 'word-garden')
 
     def test_exact_deployment_environment_sha_branch_and_run(self):
         self.assertEqual(self.validate(self.deployment()), 'https://abcd.word-garden-6fl.pages.dev')
@@ -105,13 +113,15 @@ for (const url of [
                 self.validate(item)
 
     def test_cli_cannot_omit_branch_or_select_other_project(self):
-        command = preview.deploy_command('/cli', 'preview-a', 'a' * 40, 'cloud-preview:run', 'word-garden-6fl')
-        self.assertEqual(command[command.index('--project-name') + 1], 'word-garden-6fl')
+        command = preview.deploy_command('/cli', 'preview-a', 'a' * 40, 'cloud-preview:run', 'word-garden')
+        self.assertEqual(command[command.index('--project-name') + 1], 'word-garden')
         self.assertEqual(command[command.index('--branch') + 1], 'preview-a')
         self.assertEqual(command[command.index('--commit-hash') + 1], 'a' * 40)
         self.assertIn('--commit-dirty=false', command)
-        for project, branch, commit in [('word-garden', 'preview-a', 'a' * 40), ('other', 'preview-a', 'a' * 40), ('word-garden-6fl', '', 'a' * 40),
-                                         ('word-garden-6fl', 'preview-a', 'short')]:
+        for project, branch, commit in [('word-garden-6fl', 'preview-a', 'a' * 40),
+                                         ('other', 'preview-a', 'a' * 40),
+                                         ('word-garden', '', 'a' * 40),
+                                         ('word-garden', 'preview-a', 'short')]:
             with self.assertRaises(preview.PreviewError):
                 preview.deploy_command('/cli', branch, commit, 'run', project)
 
@@ -141,8 +151,9 @@ for (const url of [
         self.assertIsNone(preview.NoRedirect().redirect_request(None, None, None, None, None, None))
 
     def test_required_gates_preserved(self):
-        self.assertEqual(preview.PROJECTS['word-garden-6fl'], ['test', 'test:feedback', 'build', 'test:smoke'])
-        self.assertEqual(preview.PROJECTS['void-swarm'], ['test:cloud', 'build'])
+        self.assertEqual(preview.PROJECTS['word-garden']['gates'],
+                         ['test', 'test:feedback', 'build', 'test:smoke'])
+        self.assertEqual(preview.PROJECTS['void-swarm']['gates'], ['test:cloud', 'build'])
 
     def test_orchestration_stops_on_gate_failure_and_rebuilds_after_cloud_tests(self):
         for fail in (True, False):
@@ -212,16 +223,17 @@ for (const url of [
                      patch.object(preview.time, 'sleep'):
                     if served_marker == marker:
                         self.assertEqual(preview.wait_for_deployment(cf, 'preview-a', 'a' * 40,
-                                         'cloud-preview:run', 'word-garden-6fl', marker),
+                                         'cloud-preview:run', 'word-garden', marker),
                                          ('one', 'https://abcd.word-garden-6fl.pages.dev'))
                     else:
                         with self.assertRaises(preview.PreviewError):
                             preview.wait_for_deployment(cf, 'preview-a', 'a' * 40,
-                                                        'cloud-preview:run', 'word-garden-6fl', marker)
+                                                        'cloud-preview:run', 'word-garden', marker)
                 self.assertEqual(cf.read.call_args_list[-1].args, ('/deployments/one',))
 
     def test_production_snapshot_detects_deployment_or_configuration_changes(self):
-        item = {'name': 'word-garden-6fl', 'production_branch': 'main',
+        item = {'name': 'word-garden', 'subdomain': 'word-garden-6fl.pages.dev',
+                'production_branch': 'main',
                 'canonical_deployment': {'id': 'production-one'},
                 'deployment_configs': {'production': {'compatibility_date': '2026-01-01'}}}
         before = preview.production_snapshot(item, 'preview-a')

@@ -1,13 +1,17 @@
-// Fixed Pages destinations are distinct from package.json repository names.
-const selectors = new Map([
-  ['word-garden-6fl', '.letter'],
-  ['void-swarm', 'canvas']
+// API project names and generated pages.dev hostnames are independent values.
+const targets = new Map([
+  ['word-garden', { hostname: 'word-garden-6fl.pages.dev', selector: '.letter' }],
+  ['void-swarm', { hostname: 'void-swarm.pages.dev', selector: 'canvas' }]
 ]);
 
 export function validatePreviewOrigin(url, project) {
-  if (!selectors.has(project) || typeof url !== 'string' ||
-      new RegExp(`^https://[a-z0-9]+\\.${project}\\.pages\\.dev$`).exec(url)?.[0] !== url) {
+  const target = targets.get(project);
+  const pattern = target && new RegExp(
+    '^https://[a-z0-9]+\\.' + target.hostname.replaceAll('.', '\\.') + '$'
+  );
+  if (!target || typeof url !== 'string' ||
+      pattern.exec(url)?.[0] !== url) {
     throw new Error('An immutable allow-listed Pages deployment URL is required.');
   }
-  return selectors.get(project);
+  return target.selector;
 }

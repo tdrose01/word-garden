@@ -17,10 +17,18 @@ import uuid
 
 WRANGLER = '4.45.0'
 PROJECTS = {
-    'word-garden-6fl': ['test', 'test:feedback', 'build', 'test:smoke'],
-    'void-swarm': ['test:cloud', 'build'],
+    # Cloudflare's API project name and the generated pages.dev hostname are
+    # independent identifiers. Never derive one from the other.
+    'word-garden': {
+        'hostname': 'word-garden-6fl.pages.dev',
+        'gates': ['test', 'test:feedback', 'build', 'test:smoke'],
+    },
+    'void-swarm': {
+        'hostname': 'void-swarm.pages.dev',
+        'gates': ['test:cloud', 'build'],
+    },
 }
-REPOSITORY_PROJECTS = {'word-garden': 'word-garden-6fl', 'void-swarm': 'void-swarm'}
+REPOSITORY_PROJECTS = {'word-garden': 'word-garden', 'void-swarm': 'void-swarm'}
 
 
 class PreviewError(Exception):
@@ -105,11 +113,14 @@ class Cloudflare:
 
 def production_snapshot(project, branch):
     require(project.get('name') in PROJECTS, 'Unexpected project returned by Cloudflare.')
+    require(project.get('subdomain') == PROJECTS[project['name']]['hostname'],
+            'Unexpected project hostname returned by Cloudflare.')
     require(isinstance(project.get('production_branch'), str) and bool(project['production_branch']),
             'Unknown production branch; refusing upload.')
     validate_branch(branch, project.get('production_branch'))
     canonical = project.get('canonical_deployment') or {}
-    return {'branch': project['production_branch'], 'deployment': canonical.get('id'),
+    return {'branch': project['production_branch'], 'hostname': project['subdomain'],
+            'deployment': canonical.get('id'),
             'config': project.get('deployment_configs', {}).get('production')}
 
 
@@ -124,7 +135,8 @@ def validate_deployment(deployment, branch, commit, message, project):
     require(deployment.get('latest_stage', {}).get('status') == 'success', 'Deployment is not successful.')
     url = deployment.get('url', '')
     # Return only the immutable deployment origin, never production or an alias.
-    require(bool(re.fullmatch(r'https://[a-z0-9]+\.' + re.escape(project) + r'\.pages\.dev', url)),
+    hostname = PROJECTS[project]['hostname']
+    require(bool(re.fullmatch(r'https://[a-z0-9]+\.' + re.escape(hostname), url)),
             'Unexpected deployment URL.')
     return url
 
@@ -209,7 +221,7 @@ def main():
             run(['npm', 'ci'], checkout, env)
             run(['npx', '--no-install', 'playwright', 'install', 'chromium', 'ffmpeg'], checkout, env)
             run(['python3', 'scripts/cloud-preview.test.py'], checkout, env)
-            for command in PROJECTS[project]:
+            for command in PROJECTS[project]['gates']:
                 print(f'Running required gate: npm run {command}', flush=True)
                 run(['npm', 'run', command], checkout, env)
             # QA/sample tests can leave special builds in dist. Always rebuild.
@@ -218,7 +230,8 @@ def main():
             require((checkout / 'dist/index.html').is_file(), 'Build is missing index.html.')
             require(not run(['git', 'diff', 'HEAD', '--exit-code'], checkout, capture=True), 'Tests changed tracked source.')
             run_id = uuid.uuid4().hex
-            marker = {'schema': 1, 'project': project, 'branch': args.branch, 'commit': commit,
+            marker = {'schema': 1, 'project': project, 'hostname': PROJECTS[project]['hostname'],
+                      'branch': args.branch, 'commit': commit,
                       'run_id': run_id, 'bundle_sha256': bundle_digest(checkout / 'dist'), 'cloud_saves': 'paused'}
             message = 'cloud-preview:' + run_id
             (checkout / 'dist/preview-proof.json').write_text(json.dumps(marker) + '\n')

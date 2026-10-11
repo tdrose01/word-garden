@@ -1,12 +1,13 @@
 # Test and preview from the cloud environment
 
 This is the reusable preview deployment workflow for the existing Cloudflare
-Pages projects `word-garden-6fl` and `void-swarm`. The runner maps the
-`word-garden` package name explicitly to `word-garden-6fl`; `void-swarm` maps to
-`void-swarm`. Package names are not passed directly to Wrangler or the API.
-The first live run validates the fixed project and production branch via the
-Cloudflare API. The obsolete `word-garden` Pages project is rejected.
-No project is created and no project configuration is written.
+Pages API projects `word-garden` and `void-swarm`. Word Garden's API project name
+is `word-garden`, while its Cloudflare-generated hostname is the independently
+assigned `word-garden-6fl.pages.dev`. The runner keeps those identifiers separate:
+Wrangler and Cloudflare API paths receive `word-garden`, while served URL checks
+require `word-garden-6fl.pages.dev`. Neither value is derived from the other.
+The first live run validates the fixed API project and production branch via the
+Cloudflare API. No project is created and no project configuration is written.
 
 ## Use
 
@@ -62,10 +63,19 @@ For deployment, pinned Wrangler `4.45.0` is installed without credentials in a
 temporary CLI directory. Deployment runs from another configuration-free
 directory containing only the final `dist` and existing Pages `functions`.
 Repository Wrangler configuration cannot change the destination. The command
-always supplies project, explicit preview branch, full commit hash, clean-commit
-flag and a unique run message. Wrangler output is captured and never echoed,
+always supplies the API project name, explicit preview branch, full commit hash,
+clean-commit flag and a unique run message. Wrangler output is captured and never echoed,
 including on failure, to prevent credential-bearing diagnostics from leaking.
 The wrapper reports the command's exit status if upload fails.
+
+This uses the supported Pages Direct Upload path, `wrangler pages deploy`, for a
+prebuilt directory. Wrangler inventories the staged `dist` tree by content hash:
+assets already present in Cloudflare's upload store may be reused, while new or
+changed files are uploaded. That transfer optimization does not reuse an old
+deployment or old build output—the runner always builds the exact committed SHA,
+stages that complete output plus the repository's current `functions`, creates a
+fresh preview deployment, and verifies the served bundle marker. Do not replace
+this with raw upload API calls or copy assets from an earlier deployment.
 
 Before upload, the runner reads the existing project's production branch,
 canonical production deployment and production configuration. It compares them
