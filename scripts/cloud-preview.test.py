@@ -67,7 +67,8 @@ for (const url of [
   'https://abcdXword-garden-6fl.pages.dev', 'https://abcd.word-garden-6flXpages.dev',
   'https://abcd.word-garden-6fl.pagesXdev', 'https://abcd.word-garden-6fl.pages.dev.evil.example',
   'https://abcd.word-garden-6fl.pages.dev/', 'https://abcd.word-garden-6fl.pages.dev?alias=1',
-  'http://abcd.word-garden-6fl.pages.dev', 'https://abcd.void-swarm.pages.dev', undefined
+  'http://abcd.word-garden-6fl.pages.dev', 'https://abcd.void-swarm.pages.dev',
+  'https://abcd.word-garden-6fl.pages.dev\n', 'https://abcd.word-garden-6fl.pages.dev\r', undefined
 ]) assert.throws(() => validatePreviewOrigin(url, 'word-garden-6fl'));
 '''], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
