@@ -1,5 +1,6 @@
 import { getDailyObjective } from '../src/game.js';
 import { runPlaytestRegression } from './playtest-regression.mjs';
+import { runCloudSaveBrowserAcceptance } from './cloud-save-browser.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -747,6 +748,7 @@ try {
   const { browser } = browserHandle;
 
   try {
+    await runCloudSaveBrowserAcceptance(browser, url, { development: !smokeTarget.external });
     const desktop = await freshPage(browser, { viewport: { width: 900, height: 900 } });
     await expectViewportFit(desktop.page, 'desktop campaign');
     if (!await desktop.page.locator('.slot-number').allTextContents().then(labels => labels.includes('1/2'))) throw new Error('Shared starts must label both words');
