@@ -27,6 +27,58 @@ function feedbackRequest(body, origin = allowedOrigin) {
 const originalFetch = globalThis.fetch;
 
 try {
+  // Origin regressions are offline: any accidental upstream call fails before
+  // reaching GitHub. Only the explicit mocked success case below can "create".
+  globalThis.fetch = async () => { throw new Error('Unexpected network call in origin regression'); };
+  const previewOrigin = 'https://gcp-preview.word-garden-6fl.pages.dev';
+  const existingOrigins = 'https://word-garden-6fl.pages.dev, https://tester.example';
+  const previewEnv = { ALLOWED_FEEDBACK_ORIGINS: `${existingOrigins},${previewOrigin}`, GITHUB_TOKEN: 'test-token' };
+  const productionEnv = { ALLOWED_FEEDBACK_ORIGINS: existingOrigins, GITHUB_TOKEN: 'test-token' };
+  const optionsRequest = origin => new Request(`${previewOrigin}/api/feedback`, {
+    method: 'OPTIONS', headers: { origin }
+  });
+  for (const env of [{}, productionEnv]) {
+    const rejectedPreflight = await onRequestOptions({ request: optionsRequest(previewOrigin), env });
+    assert.equal(rejectedPreflight.status, 403);
+    assert.equal(rejectedPreflight.headers.get('access-control-allow-origin'), null);
+    const rejectedPost = await onRequestPost({ request: feedbackRequest(validPayload, previewOrigin), env });
+    assert.equal(rejectedPost.status, 403);
+    assert.deepEqual(await rejectedPost.json(), { ok: false, error: 'Origin is not allowed.' });
+  }
+  for (const origin of [previewOrigin, 'https://word-garden-6fl.pages.dev', 'https://tester.example']) {
+    const acceptedPreflight = await onRequestOptions({ request: optionsRequest(origin), env: previewEnv });
+    assert.equal(acceptedPreflight.status, 204);
+    assert.equal(acceptedPreflight.headers.get('access-control-allow-origin'), origin);
+    assert.equal(acceptedPreflight.headers.get('vary'), 'Origin');
+  }
+  for (const origin of ['https://other.word-garden-6fl.pages.dev',
+    'https://gcp-preview.word-garden-6fl.pages.dev.attacker.example',
+    'http://gcp-preview.word-garden-6fl.pages.dev', 'null', 'https://example.com']) {
+    const rejectedPreflight = await onRequestOptions({ request: optionsRequest(origin), env: previewEnv });
+    assert.equal(rejectedPreflight.status, 403);
+    const rejectedPost = await onRequestPost({ request: feedbackRequest(validPayload, origin), env: previewEnv });
+    assert.equal(rejectedPost.status, 403);
+    assert.equal(rejectedPost.headers.get('access-control-allow-origin'), null);
+    assert.equal((await rejectedPost.json()).error, 'Origin is not allowed.');
+  }
+  const missingOrigin = new Request(`${previewOrigin}/api/feedback`, { method: 'OPTIONS' });
+  assert.equal((await onRequestOptions({ request: missingOrigin, env: previewEnv })).status, 403);
+  let previewGithubCalls = 0;
+  globalThis.fetch = async (url, init) => {
+    previewGithubCalls += 1;
+    assert.equal(url, 'https://api.github.com/repos/tdrose01/word-garden/issues');
+    assert.equal(init.method, 'POST');
+    return new Response(JSON.stringify({ html_url: 'https://github.com/tdrose01/word-garden/issues/99' }), {
+      status: 201, headers: { 'content-type': 'application/json' }
+    });
+  };
+  const acceptedPreviewPost = await onRequestPost({ request: feedbackRequest(validPayload, previewOrigin), env: previewEnv });
+  assert.equal(acceptedPreviewPost.status, 201);
+  assert.equal(acceptedPreviewPost.headers.get('access-control-allow-origin'), previewOrigin);
+  assert.equal(previewGithubCalls, 1);
+  assert.equal(productionEnv.ALLOWED_FEEDBACK_ORIGINS, existingOrigins);
+  globalThis.fetch = async () => { throw new Error('Unexpected network call in origin regression'); };
+
   const preflight = await onRequestOptions({
     request: new Request('https://word-garden.pages.dev/api/feedback', {
       method: 'OPTIONS',
