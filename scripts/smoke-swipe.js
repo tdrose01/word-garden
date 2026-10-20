@@ -743,8 +743,8 @@ async function verifyVisibleControls(page) {
 
 try {
   await waitForServer();
-  const browserHandle = await launchBrowser();
-  const { browser } = browserHandle;
+  let browserHandle = await launchBrowser();
+  let { browser } = browserHandle;
 
   try {
     const desktop = await freshPage(browser, { viewport: { width: 900, height: 900 } });
@@ -890,35 +890,45 @@ try {
       await pollen.context.close();
     }
     // Every shipped campaign shape must fit without panning on a compact phone.
-    const matrix = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true});
+    // Isolate the reload-heavy shape matrices from the gesture suite and from
+    // each other so Chromium releases each renderer's network resources.
+    await closeBrowser(browserHandle);
+    browserHandle = await launchBrowser();
+    ({ browser } = browserHandle);
+    const campaignMatrix = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true});
     for (let index=0; index<levels.length; index++) {
-      await matrix.page.evaluate(({index,version}) => {
+      await campaignMatrix.page.evaluate(({index,version}) => {
         const save = JSON.parse(localStorage.getItem('word-garden-state'));
         Object.assign(save, {campaignLevelVersion:version,levelIndex:index,solved:[],bonusFound:[],revealed:[]});
         Object.assign(save.campaign,{cursor:index,completedLevels:index,completedIds:Array.from({length:index},(_,i)=>i),bestRun:index,lastCompletedLevelId:index});
         localStorage.setItem('word-garden-state',JSON.stringify(save));
       },{index,version:LEVEL_VERSION});
-      await matrix.page.reload();
-      await matrix.page.waitForSelector('.letter');
-      await matrix.page.evaluate(() => document.fonts.ready);
-      if (sortedLetters(await wheelLetters(matrix.page)) !== sortedLetters(levels[index].letters)) throw new Error(`Campaign matrix loaded the wrong puzzle at ${index+1}`);
-      if (wheelSpellsTarget((await wheelLetters(matrix.page)).join(''),levels[index].targets)) throw new Error(`Campaign wheel leaks answer ${index+1}`);
-      await expectBoardAndWheelTogether(matrix.page, `campaign shape ${index+1}`);
+      await campaignMatrix.page.reload();
+      await campaignMatrix.page.waitForSelector('.letter');
+      await campaignMatrix.page.evaluate(() => document.fonts.ready);
+      if (sortedLetters(await wheelLetters(campaignMatrix.page)) !== sortedLetters(levels[index].letters)) throw new Error(`Campaign matrix loaded the wrong puzzle at ${index+1}`);
+      if (wheelSpellsTarget((await wheelLetters(campaignMatrix.page)).join(''),levels[index].targets)) throw new Error(`Campaign wheel leaks answer ${index+1}`);
+      await expectBoardAndWheelTogether(campaignMatrix.page, `campaign shape ${index+1}`);
     }
+    await campaignMatrix.context.close();
+    await closeBrowser(browserHandle);
+    browserHandle = await launchBrowser();
+    ({ browser } = browserHandle);
+    const dailyMatrix = await freshPage(browser, {viewport:{width:360,height:640},isMobile:true,hasTouch:true});
     const dailyEpoch = Date.parse('2030-01-01T12:00:00Z');
-    await matrix.page.clock.install({time:new Date(dailyEpoch)});
+    await dailyMatrix.page.clock.install({time:new Date(dailyEpoch)});
     for(let index=0;index<dailyLevels.length;index++) {
       const date=new Date(dailyEpoch+index*86400000);
-      await matrix.page.clock.setFixedTime(date);
-      await matrix.page.evaluate(() => {const save=JSON.parse(localStorage.getItem('word-garden-state'));save.mode='daily';delete save.daily;localStorage.setItem('word-garden-state',JSON.stringify(save));});
-      await matrix.page.reload();
-      await matrix.page.waitForSelector('.letter');
-      await matrix.page.evaluate(() => document.fonts.ready);
-      if(sortedLetters(await wheelLetters(matrix.page))!==sortedLetters(getDailyLevel(date).letters)) throw new Error(`Daily matrix loaded wrong puzzle ${index}`);
-      if (wheelSpellsTarget((await wheelLetters(matrix.page)).join(''),getDailyLevel(date).targets)) throw new Error(`Daily wheel leaks answer ${index+1}`);
-      await expectBoardAndWheelTogether(matrix.page,`daily shape ${index+1}`);
+      await dailyMatrix.page.clock.setFixedTime(date);
+      await dailyMatrix.page.evaluate(() => {const save=JSON.parse(localStorage.getItem('word-garden-state'));save.mode='daily';delete save.daily;localStorage.setItem('word-garden-state',JSON.stringify(save));});
+      await dailyMatrix.page.reload();
+      await dailyMatrix.page.waitForSelector('.letter');
+      await dailyMatrix.page.evaluate(() => document.fonts.ready);
+      if(sortedLetters(await wheelLetters(dailyMatrix.page))!==sortedLetters(getDailyLevel(date).letters)) throw new Error(`Daily matrix loaded wrong puzzle ${index}`);
+      if (wheelSpellsTarget((await wheelLetters(dailyMatrix.page)).join(''),getDailyLevel(date).targets)) throw new Error(`Daily wheel leaks answer ${index+1}`);
+      await expectBoardAndWheelTogether(dailyMatrix.page,`daily shape ${index+1}`);
     }
-    await matrix.context.close();
+    await dailyMatrix.context.close();
     const nineLetters = await freshPage(browser, {viewport: {width:360,height:640}, isMobile:true, hasTouch:true}, {levelIndex:35, campaign:{completedLevels:35,bestRun:35,lastCompletedLevelId:35,puzzleOrder:sequentialPuzzleOrder}});
     await expectViewportFit(nineLetters.page, 'nine-letter compact phone');
     await expectBoardFullyVisible(nineLetters.page, 'nine-letter compact phone');
@@ -1121,6 +1131,12 @@ try {
     await expectCoins(living.page,expectedCoins);
     await living.context.close();
 
+    // The primary smoke matrix intentionally opens many short-lived contexts.
+    // Run the extended garden/progression regressions in a fresh browser so a
+    // long validation pass cannot exhaust Chromium's per-process resources.
+    await closeBrowser(browserHandle);
+    browserHandle = await launchBrowser();
+    ({ browser } = browserHandle);
     await runPlaytestRegression(browser, url);
     assertNoRuntimeFailures();
   } catch (error) {
